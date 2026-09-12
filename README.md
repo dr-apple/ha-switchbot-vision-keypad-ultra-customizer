@@ -47,7 +47,7 @@ entity's *value*, not baked into every other entity's label.
 ### HACS (custom repository)
 
 1. HACS → Integrations → ⋮ → Custom repositories.
-2. Add `https://github.com/dr-apple/ha-keypad-router`, category
+2. Add `https://github.com/dr-apple/ha-switchbot-vision-keypad-ultra-customizer`, category
    "Integration".
 3. Install "SwitchBot Vision Keypad Ultra Customizer", restart Home
    Assistant.

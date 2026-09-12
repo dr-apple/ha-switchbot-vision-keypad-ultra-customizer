@@ -1,0 +1,38 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Keypad Person Router",
+        "description": "Verbindet Keypad-Bridge-Events mit Personen, Schlössern und Automationen.",
+        "data": {
+          "unlock_event": "Unlock-Event",
+          "lock_event": "Lock-Event",
+          "doorbell_event": "Doorbell-Event",
+          "notify_target": "Push-Benachrichtigungsziel",
+          "logbook_name": "Name im Logbuch"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "persons": "Personen",
+          "credentials": "Zuordnung Slots → Personen"
+        }
+      },
+      "persons": {
+        "title": "Personen (fest: 6 Slots)",
+        "description": "Name, Schloss, Aktion und optionale Automation pro Person."
+      },
+      "credentials": {
+        "title": "Zuordnung Slots → Personen",
+        "description": "Welche Person gehört zu welchem Credential-Slot je Methode."
+      }
+    }
+  }
+}

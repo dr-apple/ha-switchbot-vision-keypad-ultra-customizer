@@ -10,9 +10,13 @@ from __future__ import annotations
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import (
+    async_track_state_added_domain,
+    async_track_state_removed_domain,
+)
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
@@ -61,7 +65,40 @@ def _person_display(entry: ConfigEntry, key: str) -> str:
     return name if name else f"Person {key}"
 
 
-class _BasePersonSelect(SelectEntity, RestoreEntity):
+class _DomainOptionsRefreshMixin:
+    """Keep `options` live when it lists every entity of a given domain.
+
+    Without this, a select whose options come from
+    `hass.states.async_entity_ids(...)` only ever reports the list as it
+    looked the moment it last wrote its state (setup, or the last time
+    someone picked an option). On startup, integrations that own locks
+    (Tesla, SwitchBot Cloud, KeyMagic, ...) can finish loading well after
+    this one does, so the very first snapshot is incomplete and, with
+    nothing to prompt another write, stays that way -- shown as the
+    picked value going "unknown" because it's no longer in that frozen
+    list, even though the entity itself still exists.
+    """
+
+    _tracked_domains: tuple[str, ...] = ()
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if not self._tracked_domains:
+            return
+
+        @callback
+        def _refresh(_event) -> None:
+            self.async_write_ha_state()
+
+        self.async_on_remove(
+            async_track_state_added_domain(self.hass, self._tracked_domains, _refresh)
+        )
+        self.async_on_remove(
+            async_track_state_removed_domain(self.hass, self._tracked_domains, _refresh)
+        )
+
+
+class _BasePersonSelect(_DomainOptionsRefreshMixin, SelectEntity, RestoreEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
 
@@ -92,6 +129,7 @@ class PersonLockSelect(_BasePersonSelect):
     """One of up to LOCK_SLOTS_PER_PERSON locks this person's action targets."""
 
     _attr_icon = "mdi:lock"
+    _tracked_domains = ("lock",)
 
     def __init__(
         self, hass: HomeAssistant, entry: ConfigEntry, person_key: str, lock_slot: str
@@ -150,6 +188,7 @@ class PersonScriptSelect(_BasePersonSelect):
     """An optional script to run for this person, instead of/alongside locks."""
 
     _attr_icon = "mdi:script-text-outline"
+    _tracked_domains = ("script",)
 
     def __init__(self, hass, entry, person_key) -> None:
         super().__init__(hass, entry, person_key)
@@ -232,7 +271,7 @@ class CredentialPersonSelect(SelectEntity, RestoreEntity):
         self.async_write_ha_state()
 
 
-class RearmButtonSelect(SelectEntity, RestoreEntity):
+class RearmButtonSelect(_DomainOptionsRefreshMixin, SelectEntity, RestoreEntity):
     """Keypad re-arm button, pressed a few seconds after every unlock.
 
     Some keypads (e.g. Keypad Vision on switchbot-keypad-bridge) only
@@ -248,6 +287,7 @@ class RearmButtonSelect(SelectEntity, RestoreEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
     _attr_icon = "mdi:lock-reset"
+    _tracked_domains = ("button",)
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass = hass

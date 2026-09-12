@@ -21,6 +21,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     CONF_CREDENTIALS,
+    CONF_NOTIFY_TARGET,
     CONF_PERSON_LOCK_ACTION,
     CONF_PERSON_LOCK_PREFIX,
     CONF_PERSON_NAME,
@@ -57,6 +58,7 @@ async def async_setup_entry(
         for slot in SLOT_KEYS:
             entities.append(CredentialPersonSelect(hass, entry, method, slot))
     entities.append(RearmButtonSelect(hass, entry))
+    entities.append(NotifyTargetSelect(hass, entry))
     async_add_entities(entities)
 
 
@@ -320,4 +322,54 @@ class RearmButtonSelect(_DomainOptionsRefreshMixin, SelectEntity, RestoreEntity)
         # key, so it's distinguishable from "never configured".
         new_options[CONF_REARM_BUTTON] = "" if option == NONE_OPTION else option
         self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+        self.async_write_ha_state()
+
+
+class NotifyTargetSelect(_DomainOptionsRefreshMixin, SelectEntity, RestoreEntity):
+    """Push-notification target for unlock/doorbell events.
+
+    Was only settable once, at initial setup, in entry.data -- with no
+    way to fix it if the target entity later disappeared (phone re-paired,
+    companion app reinstalled) other than editing storage by hand. Making
+    it a live select, like everything else here, means a dead reference
+    is visible and fixable from the device page instead of silently
+    swallowed by the fire-and-forget notify call.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_icon = "mdi:bell-outline"
+    _tracked_domains = ("notify",)
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        self.hass = hass
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_notify_target_select"
+
+    @property
+    def name(self) -> str:
+        return "Notify Ziel"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._entry.entry_id)}, name=INTEGRATION_TITLE
+        )
+
+    @property
+    def options(self) -> list[str]:
+        targets = sorted(self.hass.states.async_entity_ids("notify"))
+        return [NONE_OPTION, *targets]
+
+    @property
+    def current_option(self) -> str | None:
+        return self._entry.data.get(CONF_NOTIFY_TARGET) or NONE_OPTION
+
+    async def async_select_option(self, option: str) -> None:
+        new_data = dict(self._entry.data)
+        if option == NONE_OPTION:
+            new_data.pop(CONF_NOTIFY_TARGET, None)
+        else:
+            new_data[CONF_NOTIFY_TARGET] = option
+        self.hass.config_entries.async_update_entry(self._entry, data=new_data)
         self.async_write_ha_state()

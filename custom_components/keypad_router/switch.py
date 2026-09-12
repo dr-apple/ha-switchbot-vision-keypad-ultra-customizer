@@ -8,7 +8,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import CONF_PERSON_NAME, CONF_PERSONS, DOMAIN, PERSON_KEYS
+from .const import CONF_PERSON_NAME, CONF_PERSONS, DOMAIN, INTEGRATION_TITLE, PERSON_KEYS
 
 
 async def async_setup_entry(
@@ -55,7 +55,7 @@ class PersonEnabledSwitch(SwitchEntity, RestoreEntity):
     def device_info(self) -> DeviceInfo:
         return DeviceInfo(
             identifiers={(DOMAIN, self._entry.entry_id)},
-            name="Keypad Person Router",
+            name=INTEGRATION_TITLE,
             manufacturer="dr-apple",
             model="keypad_router",
         )

@@ -1,9 +1,12 @@
-# Keypad Person Router
+# SwitchBot Vision Keypad Ultra Customizer
 
 A small Home Assistant integration that sits between a keypad bridge (e.g.
 [switchbot-keypad-bridge](https://github.com/pierluigizagaria/switchbot-keypad-bridge))
 and your locks/automations, and answers one question cleanly: **who used the
 keypad, and what should happen because of it?**
+
+Despite the name, it isn't SwitchBot-specific — any integration that fires an
+event with a `method` and a credential `index` on unlock works.
 
 ## Why
 
@@ -15,13 +18,14 @@ directly to "who unlocked" with a flat list of helpers gets confusing fast,
 and wiring "also open the front door for family" into the same automation
 means editing one big blob of YAML every time something changes.
 
-This integration fixes that by giving you two small, fixed tables instead:
+This integration fixes that with two small, fixed tables — both fully live
+on the device page, nothing hidden behind a settings dialog:
 
 - **6 persons.** Each with a name, a target lock, an action
   (open / unlock / lock), an optional automation to also trigger, and a
   dashboard-visible on/off switch.
 - **A credential grid.** For every (method, slot) pair — 4 methods × 6 slots
-  — pick which of the 6 persons it belongs to.
+  — a dropdown picks which of the 6 persons it belongs to.
 
 On every unlock/lock/doorbell event the integration resolves the person,
 logs the access to the Logbook, sends a push notification (if configured),
@@ -41,7 +45,8 @@ constants in `const.py` and it scales the same way.
 1. HACS → Integrations → ⋮ → Custom repositories.
 2. Add `https://github.com/dr-apple/ha-keypad-router`, category
    "Integration".
-3. Install "Keypad Person Router", restart Home Assistant.
+3. Install "SwitchBot Vision Keypad Ultra Customizer", restart Home
+   Assistant.
 
 ### Manual
 
@@ -50,26 +55,28 @@ folder and restart Home Assistant.
 
 ## Setup
 
-1. **Settings → Devices & Services → Add Integration → "Keypad Person
-   Router"**.
+1. **Settings → Devices & Services → Add Integration → "SwitchBot Vision
+   Keypad Ultra Customizer"**.
 2. Enter the three event types your bridge fires (defaults match
    switchbot-keypad-bridge: `esphome.switchbot_keypad_unlock`,
    `esphome.switchbot_keypad_lock`, `esphome.switchbot_keypad_doorbell`),
    and optionally a notify target for push notifications.
-3. Open the integration's **Configure** button:
-   - **Personen** — fill in name, lock, action, and optional automation for
-     each of the 6 rows you actually use.
-   - **Zuordnung Slots → Personen** — for every method/slot your keypad
-     actually has enrolled, pick the matching person from the dropdown.
+3. Open the device page. Everything else is configured right there, as
+   regular entities:
+   - **Person N Name** (text), **Person N Schloss** / **Aktion** /
+     **Automation** (selects), **Person N aktiv** (switch) — one set of four
+     per person, for the persons you actually use.
+   - **\<Methode> Slot \<N>** (select) — one per method/slot your keypad has
+     enrolled, picks which person that credential belongs to.
 
-That's it — no dashboard entities are required to configure it, only to
-*use* it (see below).
+No YAML, no options flow — just fill in the entities.
 
 ## Example dashboard
 
-The integration itself only creates one thing you'd put on a dashboard: a
-switch per person. Everything else (name, lock, action, automation) lives in
-the integration's own settings page. A minimal "Schließsystem" view:
+The device page already shows everything, but a dedicated dashboard view
+groups it better for daily use. Example for one person ("Danny") plus the
+credential grid for two enrolled face slots and one fingerprint slot —
+duplicate the person block and add rows to the grid as you configure more:
 
 ```yaml
 type: sections
@@ -81,36 +88,35 @@ sections:
   - type: grid
     cards:
       - type: heading
-        heading: Personen
+        heading: Danny
         icon: mdi:account-key
       - type: entities
-        title: Zugriff aktiv/inaktiv
+        title: Danny
         show_header_toggle: false
         entities:
           - entity: switch.keypad_person_router_person_1_aktiv
-          - entity: switch.keypad_person_router_person_2_aktiv
-          - entity: switch.keypad_person_router_person_3_aktiv
-          - entity: switch.keypad_person_router_person_4_aktiv
-          - entity: switch.keypad_person_router_person_5_aktiv
-          - entity: switch.keypad_person_router_person_6_aktiv
+            name: Aktiv
+          - entity: select.switchbot_vision_keypad_ultra_customizer_danny_schloss
+            name: Schloss
+          - entity: select.switchbot_vision_keypad_ultra_customizer_danny_aktion
+            name: Aktion
+          - entity: select.switchbot_vision_keypad_ultra_customizer_danny_automation
+            name: Zusatz-Automation
   - type: grid
     cards:
       - type: heading
-        heading: Schlösser
-        icon: mdi:lock
-      - type: tile
-        entity: lock.tor_tor_lock_ultra
-        grid_options:
-          columns: 12
-          rows: 2
-        tap_action:
-          action: none
-        icon_tap_action:
-          action: none
-        features:
-          - type: lock-commands
-          - type: lock-open-door
-        features_position: bottom
+        heading: Codes/Gesichter → Person
+        icon: mdi:account-key
+      - type: entities
+        title: Zuordnung
+        show_header_toggle: false
+        entities:
+          - entity: select.switchbot_vision_keypad_ultra_customizer_gesicht_slot_0
+            name: Gesicht 0
+          - entity: select.switchbot_vision_keypad_ultra_customizer_gesicht_slot_1
+            name: Gesicht 1
+          - entity: select.switchbot_vision_keypad_ultra_customizer_fingerabdruck_slot_0
+            name: Fingerabdruck 0
   - type: grid
     column_span: 3
     cards:
@@ -127,15 +133,16 @@ sections:
           rows: 6
 ```
 
-Rename/duplicate the switch rows and the lock tile to match how many
-persons and locks you've actually configured.
-
 ## Notes
 
-- The person switches persist their on/off state across restarts
-  (`RestoreEntity`), defaulting to on for a switch that's never been touched.
-- Editing "Personen" or "Zuordnung" via Configure reloads the integration
-  entry, so a switch's display name updates immediately.
+- All entities persist across restarts (`RestoreEntity`); a person switch
+  never touched defaults to on.
+- Lock and automation selects list every `lock.*` / `automation.*` entity in
+  your system live, so newly added locks/automations show up without a
+  reload.
+- Editing any entity (name, lock, action, automation, credential slot)
+  updates the config entry's options and reloads it, so display names
+  (e.g. a switch's label) update immediately everywhere.
 - Logging uses the `logbook.log` service against the first configured lock
   entity, so entries group under a real device instead of collapsing under
   the integration itself.

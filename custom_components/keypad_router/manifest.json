@@ -1,6 +1,6 @@
 {
   "domain": "keypad_router",
-  "name": "Keypad Person Router",
+  "name": "SwitchBot Vision Keypad Ultra Customizer",
   "codeowners": ["@dr-apple"],
   "config_flow": true,
   "documentation": "https://github.com/dr-apple/ha-keypad-router",

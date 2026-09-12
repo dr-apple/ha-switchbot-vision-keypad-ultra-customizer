@@ -1,6 +1,7 @@
 """Constants for the Keypad Person Router integration."""
 
 DOMAIN = "keypad_router"
+INTEGRATION_TITLE = "SwitchBot Vision Keypad Ultra Customizer"
 
 METHODS = ["pin", "nfc", "fingerprint", "face"]
 METHOD_LABELS = {
@@ -44,3 +45,6 @@ CONF_PERSON_LOCK_ACTION = "lock_action"
 CONF_PERSON_AUTOMATION = "automation_entity"
 
 UNKNOWN_PERSON_LABEL = "Unbekannt"
+
+NONE_OPTION = "— keine —"
+UNASSIGNED_OPTION = "— frei —"

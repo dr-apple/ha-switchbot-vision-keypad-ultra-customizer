@@ -22,6 +22,7 @@ from .const import (
     CONF_PERSON_NAME,
     CONF_PERSON_SCRIPT,
     CONF_PERSONS,
+    CONF_REARM_BUTTON,
     DOMAIN,
     INTEGRATION_TITLE,
     LOCK_ACTIONS,
@@ -34,6 +35,7 @@ from .const import (
     SLOT_KEYS,
     UNASSIGNED_OPTION,
 )
+from .util import resolve_rearm_button
 
 
 async def async_setup_entry(
@@ -50,6 +52,7 @@ async def async_setup_entry(
     for method in METHODS:
         for slot in SLOT_KEYS:
             entities.append(CredentialPersonSelect(hass, entry, method, slot))
+    entities.append(RearmButtonSelect(hass, entry))
     async_add_entities(entities)
 
 
@@ -225,5 +228,56 @@ class CredentialPersonSelect(SelectEntity, RestoreEntity):
         credentials[self._method] = method_map
         new_options = dict(self._entry.options)
         new_options[CONF_CREDENTIALS] = credentials
+        self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+        self.async_write_ha_state()
+
+
+class RearmButtonSelect(SelectEntity, RestoreEntity):
+    """Keypad re-arm button, pressed a few seconds after every unlock.
+
+    Some keypads (e.g. Keypad Vision on switchbot-keypad-bridge) only
+    re-enable their face/fingerprint scan after seeing the paired lock
+    report LOCKED, which never happens on its own if the physical lock is
+    a separate device. Pressing a dedicated re-arm button fakes that.
+
+    Auto-detected by entity_id (see REARM_BUTTON_HINTS) so this works
+    out of the box without assigning anything -- this select just shows
+    what was picked and lets you override it if needed.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_icon = "mdi:lock-reset"
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        self.hass = hass
+        self._entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_rearm_button_select"
+
+    @property
+    def name(self) -> str:
+        return "Re-Arm Button"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._entry.entry_id)}, name=INTEGRATION_TITLE
+        )
+
+    @property
+    def options(self) -> list[str]:
+        buttons = sorted(self.hass.states.async_entity_ids("button"))
+        return [NONE_OPTION, *buttons]
+
+    @property
+    def current_option(self) -> str | None:
+        return resolve_rearm_button(self.hass, self._entry) or NONE_OPTION
+
+    async def async_select_option(self, option: str) -> None:
+        new_options = dict(self._entry.options)
+        # An explicit "— keine —" here means "don't even auto-detect one" --
+        # store an empty string (falsy but present) rather than deleting the
+        # key, so it's distinguishable from "never configured".
+        new_options[CONF_REARM_BUTTON] = "" if option == NONE_OPTION else option
         self.hass.config_entries.async_update_entry(self._entry, options=new_options)
         self.async_write_ha_state()

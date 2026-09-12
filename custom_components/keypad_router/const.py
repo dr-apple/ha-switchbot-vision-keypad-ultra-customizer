@@ -37,6 +37,11 @@ DEFAULT_LOGBOOK_NAME = "Schließsystem"
 
 CONF_PERSONS = "persons"
 CONF_CREDENTIALS = "credentials"
+CONF_REARM_BUTTON = "rearm_button"
+REARM_DELAY_SECONDS = 3
+# Auto-detect a re-arm button by entity_id substring so this works out of
+# the box for switchbot-keypad-bridge-style setups without manual setup.
+REARM_BUTTON_HINTS = ["scharf_schalten", "rearm"]
 
 # Per-person option keys (nested under CONF_PERSONS[<person_key>])
 CONF_PERSON_NAME = "name"

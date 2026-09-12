@@ -11,6 +11,7 @@ temporarily suspended.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -28,6 +29,7 @@ from .const import (
     CONF_PERSON_NAME,
     CONF_PERSON_SCRIPT,
     CONF_PERSONS,
+    CONF_REARM_BUTTON,
     CONF_UNLOCK_EVENT,
     DEFAULT_DOORBELL_EVENT,
     DEFAULT_LOCK_EVENT,
@@ -36,8 +38,10 @@ from .const import (
     DOMAIN,
     LOCK_SLOT_KEYS,
     METHOD_LABELS,
+    REARM_DELAY_SECONDS,
     UNKNOWN_PERSON_LABEL,
 )
+from .util import resolve_rearm_button
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -122,6 +126,20 @@ class KeypadRouter:
             blocking=False,
         )
 
+    async def _rearm_after_delay(self) -> None:
+        """Press the (auto-detected or configured) re-arm button, if any.
+
+        Runs as its own task so a slow/absent button never delays the
+        logging, notification, or lock actions above.
+        """
+        button_entity = resolve_rearm_button(self.hass, self.entry)
+        if not button_entity:
+            return
+        await asyncio.sleep(REARM_DELAY_SECONDS)
+        await self.hass.services.async_call(
+            "button", "press", {"entity_id": button_entity}, blocking=False
+        )
+
     def _resolve_person(self, method: str, index) -> tuple[str | None, str | None, dict]:
         """Return (display_name_or_None, person_key_or_None, person_config_dict)."""
         if index is None:
@@ -153,6 +171,7 @@ class KeypadRouter:
 
         await self._log(f"{display_name} hat per {method_label} aufgeschlossen")
         await self._notify("Tor entriegelt", f"{display_name} · {method_label}")
+        self.hass.async_create_task(self._rearm_after_delay())
 
         if person_key is None:
             return  # nothing configured for this credential -- log only

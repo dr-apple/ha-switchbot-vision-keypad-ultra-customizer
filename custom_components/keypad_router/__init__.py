@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from homeassistant.components.lock import LockEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant
 from homeassistant.helpers import entity_registry as er
@@ -153,6 +154,24 @@ class KeypadRouter:
         name = person.get(CONF_PERSON_NAME, "").strip()
         return (name or None), person_key, person
 
+    def _lock_action_for(self, lock_entity: str, requested_action: str) -> str:
+        """Fall back to `unlock` where `open` isn't supported.
+
+        A person's action applies to every lock they're assigned, but not
+        every lock supports "open" -- e.g. a switch-as-x buzzer wired up as
+        a lock only ever supports lock/unlock. Rather than making the user
+        pick a different action per lock (the whole point of one action for
+        all of a person's locks), degrade to unlock automatically so
+        "Öffnen" still does the closest working thing everywhere.
+        """
+        if requested_action != "open":
+            return requested_action
+        state = self.hass.states.get(lock_entity)
+        supported = state.attributes.get("supported_features", 0) if state else 0
+        if supported & LockEntityFeature.OPEN:
+            return "open"
+        return "unlock"
+
     def _person_enabled(self, person_key: str) -> bool:
         registry = er.async_get(self.hass)
         unique_id = f"{self.entry.entry_id}_person_{person_key}_enabled"
@@ -184,9 +203,15 @@ class KeypadRouter:
         for slot in LOCK_SLOT_KEYS:
             lock_entity = person.get(f"{CONF_PERSON_LOCK_PREFIX}{slot}")
             if lock_entity:
-                await self.hass.services.async_call(
-                    "lock", lock_action, {"entity_id": lock_entity}, blocking=False
-                )
+                action = self._lock_action_for(lock_entity, lock_action)
+                try:
+                    await self.hass.services.async_call(
+                        "lock", action, {"entity_id": lock_entity}, blocking=True
+                    )
+                except Exception:
+                    _LOGGER.exception(
+                        "Keypad Router: %s on %s failed", action, lock_entity
+                    )
 
         if script_entity := person.get(CONF_PERSON_SCRIPT):
             await self.hass.services.async_call(

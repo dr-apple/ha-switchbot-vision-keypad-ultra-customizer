@@ -1,6 +1,10 @@
-"""Select entities: per-person lock/action/automation, and the
+"""Select entities: per-person locks/action/script, and the
 method+slot -> person credential grid. Everything lives on the device
 page; there is no separate settings dialog for any of this.
+
+Naming is deliberately static ("Person 1 ...") rather than following the
+person's current name -- otherwise the one field that lets you *set* the
+name is the only one that never updates, which makes it hard to find.
 """
 from __future__ import annotations
 
@@ -13,15 +17,16 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     CONF_CREDENTIALS,
-    CONF_PERSON_AUTOMATION,
     CONF_PERSON_LOCK_ACTION,
-    CONF_PERSON_LOCK_ENTITY,
+    CONF_PERSON_LOCK_PREFIX,
     CONF_PERSON_NAME,
+    CONF_PERSON_SCRIPT,
     CONF_PERSONS,
     DOMAIN,
     INTEGRATION_TITLE,
     LOCK_ACTIONS,
     LOCK_ACTION_LABELS,
+    LOCK_SLOT_KEYS,
     METHODS,
     METHOD_LABELS,
     NONE_OPTION,
@@ -38,16 +43,17 @@ async def async_setup_entry(
 ) -> None:
     entities: list[SelectEntity] = []
     for person_key in PERSON_KEYS:
-        entities.append(PersonLockSelect(hass, entry, person_key))
+        for lock_slot in LOCK_SLOT_KEYS:
+            entities.append(PersonLockSelect(hass, entry, person_key, lock_slot))
         entities.append(PersonActionSelect(hass, entry, person_key))
-        entities.append(PersonAutomationSelect(hass, entry, person_key))
+        entities.append(PersonScriptSelect(hass, entry, person_key))
     for method in METHODS:
         for slot in SLOT_KEYS:
             entities.append(CredentialPersonSelect(hass, entry, method, slot))
     async_add_entities(entities)
 
 
-def _person_label(entry: ConfigEntry, key: str) -> str:
+def _person_display(entry: ConfigEntry, key: str) -> str:
     name = entry.options.get(CONF_PERSONS, {}).get(key, {}).get(CONF_PERSON_NAME, "").strip()
     return name if name else f"Person {key}"
 
@@ -80,17 +86,21 @@ class _BasePersonSelect(SelectEntity, RestoreEntity):
 
 
 class PersonLockSelect(_BasePersonSelect):
-    """Which lock this person's unlock action targets."""
+    """One of up to LOCK_SLOTS_PER_PERSON locks this person's action targets."""
 
     _attr_icon = "mdi:lock"
 
-    def __init__(self, hass, entry, person_key) -> None:
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, person_key: str, lock_slot: str
+    ) -> None:
         super().__init__(hass, entry, person_key)
-        self._attr_unique_id = f"{entry.entry_id}_person_{person_key}_lock_select"
+        self._lock_slot = lock_slot
+        self._conf_key = f"{CONF_PERSON_LOCK_PREFIX}{lock_slot}"
+        self._attr_unique_id = f"{entry.entry_id}_person_{person_key}_lock_{lock_slot}"
 
     @property
     def name(self) -> str:
-        return f"{_person_label(self._entry, self._person_key)} Schloss"
+        return f"Person {self._person_key} Schloss {self._lock_slot}"
 
     @property
     def options(self) -> list[str]:
@@ -99,16 +109,16 @@ class PersonLockSelect(_BasePersonSelect):
 
     @property
     def current_option(self) -> str | None:
-        return self._person().get(CONF_PERSON_LOCK_ENTITY) or NONE_OPTION
+        return self._person().get(self._conf_key) or NONE_OPTION
 
     async def async_select_option(self, option: str) -> None:
         person = self._person()
-        person[CONF_PERSON_LOCK_ENTITY] = None if option == NONE_OPTION else option
+        person[self._conf_key] = None if option == NONE_OPTION else option
         self._save_person(person)
 
 
 class PersonActionSelect(_BasePersonSelect):
-    """Which lock action (open/unlock/lock) this person triggers."""
+    """Which lock action (open/unlock/lock) applies to all of this person's locks."""
 
     _attr_icon = "mdi:lock-open-variant"
 
@@ -119,7 +129,7 @@ class PersonActionSelect(_BasePersonSelect):
 
     @property
     def name(self) -> str:
-        return f"{_person_label(self._entry, self._person_key)} Aktion"
+        return f"Person {self._person_key} Aktion"
 
     @property
     def current_option(self) -> str | None:
@@ -133,31 +143,31 @@ class PersonActionSelect(_BasePersonSelect):
         self._save_person(person)
 
 
-class PersonAutomationSelect(_BasePersonSelect):
-    """An optional extra automation to trigger for this person."""
+class PersonScriptSelect(_BasePersonSelect):
+    """An optional script to run for this person, instead of/alongside locks."""
 
-    _attr_icon = "mdi:robot"
+    _attr_icon = "mdi:script-text-outline"
 
     def __init__(self, hass, entry, person_key) -> None:
         super().__init__(hass, entry, person_key)
-        self._attr_unique_id = f"{entry.entry_id}_person_{person_key}_automation_select"
+        self._attr_unique_id = f"{entry.entry_id}_person_{person_key}_script_select"
 
     @property
     def name(self) -> str:
-        return f"{_person_label(self._entry, self._person_key)} Automation"
+        return f"Person {self._person_key} Skript"
 
     @property
     def options(self) -> list[str]:
-        automations = sorted(self.hass.states.async_entity_ids("automation"))
-        return [NONE_OPTION, *automations]
+        scripts = sorted(self.hass.states.async_entity_ids("script"))
+        return [NONE_OPTION, *scripts]
 
     @property
     def current_option(self) -> str | None:
-        return self._person().get(CONF_PERSON_AUTOMATION) or NONE_OPTION
+        return self._person().get(CONF_PERSON_SCRIPT) or NONE_OPTION
 
     async def async_select_option(self, option: str) -> None:
         person = self._person()
-        person[CONF_PERSON_AUTOMATION] = None if option == NONE_OPTION else option
+        person[CONF_PERSON_SCRIPT] = None if option == NONE_OPTION else option
         self._save_person(person)
 
 
@@ -190,7 +200,7 @@ class CredentialPersonSelect(SelectEntity, RestoreEntity):
     @property
     def options(self) -> list[str]:
         return [UNASSIGNED_OPTION] + [
-            f"{key}: {_person_label(self._entry, key)}" for key in PERSON_KEYS
+            f"{key}: {_person_display(self._entry, key)}" for key in PERSON_KEYS
         ]
 
     @property
@@ -199,7 +209,7 @@ class CredentialPersonSelect(SelectEntity, RestoreEntity):
         person_key = credentials.get(self._method, {}).get(self._slot)
         if not person_key:
             return UNASSIGNED_OPTION
-        return f"{person_key}: {_person_label(self._entry, person_key)}"
+        return f"{person_key}: {_person_display(self._entry, person_key)}"
 
     async def async_select_option(self, option: str) -> None:
         credentials = {

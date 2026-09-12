@@ -1,12 +1,13 @@
-"""Keypad Person Router.
+"""SwitchBot Vision Keypad Ultra Customizer.
 
 Listens for the events a switchbot-keypad-bridge (or similar) ESPHome
 device fires on unlock/lock/doorbell, resolves (method, credential index)
 to one of a fixed set of persons, and -- if that person is enabled --
-runs their configured lock action and/or automation. Every event is
-logged to the Logbook and (optionally) pushed to a notify target,
-regardless of the enabled switch, so access history stays complete even
-while someone's actions are temporarily suspended.
+runs their configured lock action on each of their configured locks and/or
+their configured script. Every event is logged to the Logbook and
+(optionally) pushed to a notify target, regardless of the enabled switch,
+so access history stays complete even while someone's actions are
+temporarily suspended.
 """
 from __future__ import annotations
 
@@ -22,10 +23,10 @@ from .const import (
     CONF_LOCK_EVENT,
     CONF_LOGBOOK_NAME,
     CONF_NOTIFY_TARGET,
-    CONF_PERSON_AUTOMATION,
     CONF_PERSON_LOCK_ACTION,
-    CONF_PERSON_LOCK_ENTITY,
+    CONF_PERSON_LOCK_PREFIX,
     CONF_PERSON_NAME,
+    CONF_PERSON_SCRIPT,
     CONF_PERSONS,
     CONF_UNLOCK_EVENT,
     DEFAULT_DOORBELL_EVENT,
@@ -33,6 +34,7 @@ from .const import (
     DEFAULT_LOGBOOK_NAME,
     DEFAULT_UNLOCK_EVENT,
     DOMAIN,
+    LOCK_SLOT_KEYS,
     METHOD_LABELS,
     UNKNOWN_PERSON_LABEL,
 )
@@ -75,7 +77,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Persons/credentials changed -- switch entity names may need a refresh."""
+    """Persons/credentials changed -- entity display names may need a refresh."""
     await hass.config_entries.async_reload(entry.entry_id)
 
 
@@ -86,14 +88,19 @@ class KeypadRouter:
         self.hass = hass
         self.entry = entry
 
+    def _first_lock_entity(self) -> str | None:
+        """Any configured lock, just to group Logbook entries under a real device."""
+        persons = self.entry.options.get(CONF_PERSONS, {})
+        for person in persons.values():
+            for slot in LOCK_SLOT_KEYS:
+                if lock_entity := person.get(f"{CONF_PERSON_LOCK_PREFIX}{slot}"):
+                    return lock_entity
+        return None
+
     def _logbook_target(self) -> dict:
         name = self.entry.data.get(CONF_LOGBOOK_NAME, DEFAULT_LOGBOOK_NAME)
-        persons = self.entry.options.get(CONF_PERSONS, {})
-        # Log against the first configured lock so entries group under a
-        # real device entity instead of collapsing under this integration.
-        for person in persons.values():
-            if person.get(CONF_PERSON_LOCK_ENTITY):
-                return {"name": name, "entity_id": person[CONF_PERSON_LOCK_ENTITY]}
+        if lock_entity := self._first_lock_entity():
+            return {"name": name, "entity_id": lock_entity}
         return {"name": name}
 
     async def _log(self, message: str) -> None:
@@ -115,68 +122,56 @@ class KeypadRouter:
             blocking=False,
         )
 
-    def _resolve_person(self, method: str, index) -> tuple[str | None, dict]:
-        """Return (display_name_or_None, person_config_dict)."""
+    def _resolve_person(self, method: str, index) -> tuple[str | None, str | None, dict]:
+        """Return (display_name_or_None, person_key_or_None, person_config_dict)."""
         if index is None:
-            return None, {}
+            return None, None, {}
         credentials = self.entry.options.get(CONF_CREDENTIALS, {})
         person_key = credentials.get(method, {}).get(str(index))
         if not person_key:
-            return None, {}
+            return None, None, {}
         persons = self.entry.options.get(CONF_PERSONS, {})
         person = persons.get(person_key, {})
         name = person.get(CONF_PERSON_NAME, "").strip()
-        return (name or None), person
+        return (name or None), person_key, person
 
-    def _person_enabled(self, person_key_name: str | None) -> bool:
-        if person_key_name is None:
-            return False
-        entity_id = self._switch_entity_id_for_name(person_key_name)
+    def _person_enabled(self, person_key: str) -> bool:
+        registry = er.async_get(self.hass)
+        unique_id = f"{self.entry.entry_id}_person_{person_key}_enabled"
+        entity_id = registry.async_get_entity_id("switch", DOMAIN, unique_id)
         if entity_id is None:
-            return True  # no switch resolvable yet -- fail open on logging-only
+            return True  # entity not resolvable yet -- fail open on logging-only
         state = self.hass.states.get(entity_id)
         return state is None or state.state != "off"
-
-    def _switch_entity_id_for_name(self, name: str) -> str | None:
-        persons = self.entry.options.get(CONF_PERSONS, {})
-        for key, person in persons.items():
-            if person.get(CONF_PERSON_NAME, "").strip() == name:
-                registry = er.async_get(self.hass)
-                unique_id = f"{self.entry.entry_id}_person_{key}_enabled"
-                return registry.async_get_entity_id("switch", DOMAIN, unique_id)
-        return None
 
     async def handle_unlock(self, event: Event) -> None:
         method = event.data.get("method", "unknown")
         index = event.data.get("index")
         method_label = METHOD_LABELS.get(method, method)
-        name, person = self._resolve_person(method, index)
+        name, person_key, person = self._resolve_person(method, index)
         display_name = name or f"{UNKNOWN_PERSON_LABEL} ({method_label} Slot {index})"
 
         await self._log(f"{display_name} hat per {method_label} aufgeschlossen")
         await self._notify("Tor entriegelt", f"{display_name} · {method_label}")
 
-        if name is None:
+        if person_key is None:
             return  # nothing configured for this credential -- log only
 
-        if not self._person_enabled(name):
-            _LOGGER.info("Keypad Router: %s is disabled, skipping action", name)
+        if not self._person_enabled(person_key):
+            _LOGGER.info("Keypad Router: %s is disabled, skipping action", display_name)
             return
 
-        lock_entity = person.get(CONF_PERSON_LOCK_ENTITY)
         lock_action = person.get(CONF_PERSON_LOCK_ACTION, "open")
-        if lock_entity:
-            await self.hass.services.async_call(
-                "lock", lock_action, {"entity_id": lock_entity}, blocking=False
-            )
+        for slot in LOCK_SLOT_KEYS:
+            lock_entity = person.get(f"{CONF_PERSON_LOCK_PREFIX}{slot}")
+            if lock_entity:
+                await self.hass.services.async_call(
+                    "lock", lock_action, {"entity_id": lock_entity}, blocking=False
+                )
 
-        automation_entity = person.get(CONF_PERSON_AUTOMATION)
-        if automation_entity:
+        if script_entity := person.get(CONF_PERSON_SCRIPT):
             await self.hass.services.async_call(
-                "automation",
-                "trigger",
-                {"entity_id": automation_entity},
-                blocking=False,
+                "script", "turn_on", {"entity_id": script_entity}, blocking=False
             )
 
     async def handle_lock(self, event: Event) -> None:

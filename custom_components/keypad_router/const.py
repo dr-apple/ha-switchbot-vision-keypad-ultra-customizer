@@ -40,9 +40,12 @@ CONF_CREDENTIALS = "credentials"
 
 # Per-person option keys (nested under CONF_PERSONS[<person_key>])
 CONF_PERSON_NAME = "name"
-CONF_PERSON_LOCK_ENTITY = "lock_entity"
 CONF_PERSON_LOCK_ACTION = "lock_action"
-CONF_PERSON_AUTOMATION = "automation_entity"
+CONF_PERSON_SCRIPT = "script_entity"
+
+LOCK_SLOTS_PER_PERSON = 3
+LOCK_SLOT_KEYS = [str(i) for i in range(1, LOCK_SLOTS_PER_PERSON + 1)]
+CONF_PERSON_LOCK_PREFIX = "lock_"  # + LOCK_SLOT_KEYS -> "lock_1", "lock_2", "lock_3"
 
 UNKNOWN_PERSON_LABEL = "Unbekannt"
 

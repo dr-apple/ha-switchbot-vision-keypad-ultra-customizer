@@ -8,7 +8,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import CONF_PERSON_NAME, CONF_PERSONS, DOMAIN, INTEGRATION_TITLE, PERSON_KEYS
+from .const import DOMAIN, INTEGRATION_TITLE, PERSON_KEYS
 
 
 async def async_setup_entry(
@@ -42,10 +42,7 @@ class PersonEnabledSwitch(SwitchEntity, RestoreEntity):
 
     @property
     def name(self) -> str:
-        persons = self._entry.options.get(CONF_PERSONS, {})
-        person_name = persons.get(self._person_key, {}).get(CONF_PERSON_NAME, "").strip()
-        label = person_name if person_name else f"Person {self._person_key}"
-        return f"{label} aktiv"
+        return f"Person {self._person_key} aktiv"
 
     @property
     def icon(self) -> str:

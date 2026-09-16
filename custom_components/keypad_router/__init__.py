@@ -181,6 +181,38 @@ class KeypadRouter:
         state = self.hass.states.get(entity_id)
         return state is None or state.state != "off"
 
+    def _door_closed_for_lock(self, lock_entity: str) -> bool:
+        """Whether the door/gate belonging to `lock_entity` is closed.
+
+        Many SwitchBot locks (Lock Ultra, Lock Pro) expose their own
+        integrated door-contact sensor as a sibling `binary_sensor` on the
+        same HA device. Unlocking while that door is already open is
+        pointless (nothing to open) and can leave the lock's bolt in a
+        confused position, so this is used to skip the action rather than
+        run it. Fails open (True) when the lock has no device link or no
+        `device_class: door` sibling -- e.g. locks without a built-in
+        sensor -- so those keep working exactly as before.
+        """
+        registry = er.async_get(self.hass)
+        lock_reg_entry = registry.async_get(lock_entity)
+        if lock_reg_entry is None or lock_reg_entry.device_id is None:
+            return True
+        door_entry = next(
+            (
+                e
+                for e in er.async_entries_for_device(
+                    registry, lock_reg_entry.device_id
+                )
+                if e.domain == "binary_sensor"
+                and (e.device_class or e.original_device_class) == "door"
+            ),
+            None,
+        )
+        if door_entry is None:
+            return True
+        state = self.hass.states.get(door_entry.entity_id)
+        return state is None or state.state != "on"
+
     async def handle_unlock(self, event: Event) -> None:
         method = event.data.get("method", "unknown")
         index = event.data.get("index")
@@ -203,6 +235,15 @@ class KeypadRouter:
         for slot in LOCK_SLOT_KEYS:
             lock_entity = person.get(f"{CONF_PERSON_LOCK_PREFIX}{slot}")
             if lock_entity:
+                if not self._door_closed_for_lock(lock_entity):
+                    _LOGGER.info(
+                        "Keypad Router: door open for %s, skipping unlock action",
+                        lock_entity,
+                    )
+                    await self._log(
+                        f"{display_name}: Tür an {lock_entity} war offen -- nicht entriegelt"
+                    )
+                    continue
                 action = self._lock_action_for(lock_entity, lock_action)
                 try:
                     await self.hass.services.async_call(

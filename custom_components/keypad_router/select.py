@@ -21,6 +21,8 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     CONF_CREDENTIALS,
+    CONF_KEYPAD_PERSONS,
+    CONF_KEYPADS,
     CONF_NOTIFY_TARGET,
     CONF_PERSON_LOCK_ACTION,
     CONF_PERSON_LOCK_PREFIX,
@@ -30,6 +32,7 @@ from .const import (
     CONF_REARM_BUTTON,
     DOMAIN,
     INTEGRATION_TITLE,
+    KEYPAD_KEYS,
     LOCK_ACTIONS,
     LOCK_ACTION_LABELS,
     LOCK_SLOT_KEYS,
@@ -50,10 +53,14 @@ async def async_setup_entry(
 ) -> None:
     entities: list[SelectEntity] = []
     for person_key in PERSON_KEYS:
-        for lock_slot in LOCK_SLOT_KEYS:
-            entities.append(PersonLockSelect(hass, entry, person_key, lock_slot))
-        entities.append(PersonActionSelect(hass, entry, person_key))
         entities.append(PersonScriptSelect(hass, entry, person_key))
+    for keypad_key in KEYPAD_KEYS:
+        for person_key in PERSON_KEYS:
+            for lock_slot in LOCK_SLOT_KEYS:
+                entities.append(
+                    KeypadPersonLockSelect(hass, entry, keypad_key, person_key, lock_slot)
+                )
+            entities.append(KeypadPersonActionSelect(hass, entry, keypad_key, person_key))
     for method in METHODS:
         for slot in SLOT_KEYS:
             entities.append(CredentialPersonSelect(hass, entry, method, slot))
@@ -127,23 +134,75 @@ class _BasePersonSelect(_DomainOptionsRefreshMixin, SelectEntity, RestoreEntity)
         self.async_write_ha_state()
 
 
-class PersonLockSelect(_BasePersonSelect):
-    """One of up to LOCK_SLOTS_PER_PERSON locks this person's action targets."""
+class _BaseKeypadPersonSelect(_DomainOptionsRefreshMixin, SelectEntity, RestoreEntity):
+    """Base for the per-(keypad, person) lock/action selects.
+
+    Which locks/action fire for a person depends on which physical keypad
+    recognized them -- so this data lives under
+    CONF_KEYPADS[keypad_key][CONF_KEYPAD_PERSONS][person_key], not under the
+    person itself. Person identity, the credential grid and the enabled
+    switch stay per-person/global; only "what happens on this keypad" is
+    split out here.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, keypad_key: str, person_key: str
+    ) -> None:
+        self.hass = hass
+        self._entry = entry
+        self._keypad_key = keypad_key
+        self._person_key = person_key
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._entry.entry_id)}, name=INTEGRATION_TITLE
+        )
+
+    def _keypad_person(self) -> dict:
+        keypad = self._entry.options.get(CONF_KEYPADS, {}).get(self._keypad_key, {})
+        return dict(keypad.get(CONF_KEYPAD_PERSONS, {}).get(self._person_key, {}))
+
+    def _save_keypad_person(self, person_lock_config: dict) -> None:
+        keypads = {k: dict(v) for k, v in self._entry.options.get(CONF_KEYPADS, {}).items()}
+        keypad = dict(keypads.get(self._keypad_key, {}))
+        persons = dict(keypad.get(CONF_KEYPAD_PERSONS, {}))
+        persons[self._person_key] = person_lock_config
+        keypad[CONF_KEYPAD_PERSONS] = persons
+        keypads[self._keypad_key] = keypad
+        new_options = dict(self._entry.options)
+        new_options[CONF_KEYPADS] = keypads
+        self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+        self.async_write_ha_state()
+
+
+class KeypadPersonLockSelect(_BaseKeypadPersonSelect):
+    """One of up to LOCK_SLOTS_PER_PERSON locks this keypad triggers for this person."""
 
     _attr_icon = "mdi:lock"
     _tracked_domains = ("lock",)
 
     def __init__(
-        self, hass: HomeAssistant, entry: ConfigEntry, person_key: str, lock_slot: str
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        keypad_key: str,
+        person_key: str,
+        lock_slot: str,
     ) -> None:
-        super().__init__(hass, entry, person_key)
+        super().__init__(hass, entry, keypad_key, person_key)
         self._lock_slot = lock_slot
         self._conf_key = f"{CONF_PERSON_LOCK_PREFIX}{lock_slot}"
-        self._attr_unique_id = f"{entry.entry_id}_person_{person_key}_lock_{lock_slot}"
+        self._attr_unique_id = (
+            f"{entry.entry_id}_keypad_{keypad_key}_person_{person_key}_lock_{lock_slot}"
+        )
 
     @property
     def name(self) -> str:
-        return f"Person {self._person_key} Schloss {self._lock_slot}"
+        return f"Keypad {self._keypad_key} Person {self._person_key} Schloss {self._lock_slot}"
 
     @property
     def options(self) -> list[str]:
@@ -152,38 +211,42 @@ class PersonLockSelect(_BasePersonSelect):
 
     @property
     def current_option(self) -> str | None:
-        return self._person().get(self._conf_key) or NONE_OPTION
+        return self._keypad_person().get(self._conf_key) or NONE_OPTION
 
     async def async_select_option(self, option: str) -> None:
-        person = self._person()
-        person[self._conf_key] = None if option == NONE_OPTION else option
-        self._save_person(person)
+        person_lock_config = self._keypad_person()
+        person_lock_config[self._conf_key] = None if option == NONE_OPTION else option
+        self._save_keypad_person(person_lock_config)
 
 
-class PersonActionSelect(_BasePersonSelect):
-    """Which lock action (open/unlock/lock) applies to all of this person's locks."""
+class KeypadPersonActionSelect(_BaseKeypadPersonSelect):
+    """Which lock action (open/unlock/lock) this keypad applies for this person."""
 
     _attr_icon = "mdi:lock-open-variant"
 
-    def __init__(self, hass, entry, person_key) -> None:
-        super().__init__(hass, entry, person_key)
-        self._attr_unique_id = f"{entry.entry_id}_person_{person_key}_action_select"
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, keypad_key: str, person_key: str
+    ) -> None:
+        super().__init__(hass, entry, keypad_key, person_key)
+        self._attr_unique_id = (
+            f"{entry.entry_id}_keypad_{keypad_key}_person_{person_key}_action_select"
+        )
         self._attr_options = [LOCK_ACTION_LABELS[a] for a in LOCK_ACTIONS]
 
     @property
     def name(self) -> str:
-        return f"Person {self._person_key} Aktion"
+        return f"Keypad {self._keypad_key} Person {self._person_key} Aktion"
 
     @property
     def current_option(self) -> str | None:
-        action = self._person().get(CONF_PERSON_LOCK_ACTION, "open")
+        action = self._keypad_person().get(CONF_PERSON_LOCK_ACTION, "open")
         return LOCK_ACTION_LABELS.get(action, LOCK_ACTION_LABELS["open"])
 
     async def async_select_option(self, option: str) -> None:
         reverse = {v: k for k, v in LOCK_ACTION_LABELS.items()}
-        person = self._person()
-        person[CONF_PERSON_LOCK_ACTION] = reverse.get(option, "open")
-        self._save_person(person)
+        person_lock_config = self._keypad_person()
+        person_lock_config[CONF_PERSON_LOCK_ACTION] = reverse.get(option, "open")
+        self._save_keypad_person(person_lock_config)
 
 
 class PersonScriptSelect(_BasePersonSelect):

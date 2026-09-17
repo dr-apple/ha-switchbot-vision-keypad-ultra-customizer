@@ -16,31 +16,46 @@ That index is **per method** — face slot `0` and fingerprint slot `0` are two
 different physical credentials that happen to share a number. Mapping that
 directly to "who unlocked" with a flat list of helpers gets confusing fast.
 
-This integration fixes that with two small, fixed tables — both fully live
+This integration fixes that with a few small, fixed tables — all fully live
 on the device page, nothing hidden behind a settings dialog:
 
-- **6 persons.** Each with a name, up to 3 target locks, one action applied
-  to all of them (open / unlock / lock), an optional script to also run,
-  and a dashboard-visible on/off switch.
+- **6 persons.** Each with a name, an optional script to also run, and a
+  dashboard-visible on/off switch. Person identity is shared across every
+  keypad — the same person table and the same access log apply no matter
+  which physical keypad recognized them.
+- **Up to 2 keypads.** Each with a **Quelle-ID** (source id) that must match
+  the `source_id` field the bridge puts in its event data — that's how two
+  keypads sharing the same event type get told apart. For every keypad ×
+  person pair, up to 3 target locks and one action (open / unlock / lock)
+  applied to all of them: what a given person's credential does is a
+  property of *which keypad* recognized them, not of the person alone (e.g.
+  the gate keypad can open gate+front door together, while the front-door
+  keypad only opens the front door).
 - **A credential grid.** For every (method, slot) pair — 4 methods × 6 slots
-  — a dropdown picks which of the 6 persons it belongs to.
+  — a dropdown picks which of the 6 persons it belongs to. Shared across
+  keypads too, so enrolling the same person in the same slot number on a
+  second keypad needs no extra configuration here.
 
 On every unlock/lock/doorbell event the integration resolves the person,
 logs the access to the Logbook, sends a push notification (if configured),
-and — if that person's switch is on — runs their configured lock action on
-each of their configured locks and their optional script. Everything is
-logged regardless of the switch, so turning someone off (a cleaner between
-visits, a kid grounded from the garden gate) never loses access history.
+and — if that person's switch is on — runs the lock action configured for
+*that person on the keypad the event came from*, plus the person's optional
+script. Everything is logged regardless of the switch, so turning someone
+off (a cleaner between visits, a kid grounded from the garden gate) never
+loses access history. An event whose `source_id` matches no configured
+keypad is still logged and notified, just with no lock action taken.
 
-**Deliberately not dynamic.** Six persons, four methods, six slots, three
-locks each — fixed. No "add another person" flow to maintain. If you need
-more, raise the constants in `const.py` and it scales the same way.
+**Deliberately not dynamic.** Six persons, two keypads, four methods, six
+slots, three locks each — fixed. No "add another person/keypad" flow to
+maintain. If you need more, raise the constants in `const.py` and it scales
+the same way.
 
-**Naming is static** ("Person 1 Schloss 1", "Person 1 Aktion", ...) rather
-than following the person's current name — the one field that lets you
-*set* the name would otherwise be the only one that never updates its own
-label, which makes it hard to find. The name you enter shows up as that
-entity's *value*, not baked into every other entity's label.
+**Naming is static** ("Person 1 Name", "Keypad 1 Person 1 Schloss 1", ...)
+rather than following the person's/keypad's current name — the one field
+that lets you *set* the name would otherwise be the only one that never
+updates its own label, which makes it hard to find. The name you enter
+shows up as that entity's *value*, not baked into every other entity's
+label.
 
 ## Installation
 
@@ -66,20 +81,52 @@ folder and restart Home Assistant.
    `esphome.switchbot_keypad_lock`, `esphome.switchbot_keypad_doorbell`),
    and optionally a notify target for push notifications.
 3. Open the device page. Everything else is configured right there, as
-   regular entities, per person:
-   - **Person N Name** (text) — who this is.
-   - **Person N Schloss 1/2/3** (select) — up to three locks this person's
-     credential should act on.
-   - **Person N Aktion** (select) — Öffnen / Entriegeln / Verriegeln,
-     applied to every lock configured above.
-   - **Person N Skript** (select) — an optional script to also run.
-   - **Person N aktiv** (switch) — suspend this person's actions without
-     touching their configuration; access is still logged either way.
-   - **\<Methode> Slot \<N>** (select, one set for the whole device, not
-     per person) — picks which person a given method+slot credential
-     belongs to.
+   regular entities:
+   - **Person N Name** (text) — who this is. Shared across every keypad.
+   - **Person N Skript** (select) — an optional script to also run. Shared.
+   - **Person N aktiv** (switch) — suspend this person's actions everywhere
+     without touching their configuration; access is still logged either
+     way. Shared.
+   - **\<Methode> Slot \<N>** (select, one set for the whole device) —
+     picks which person a given method+slot credential belongs to. Shared.
+   - **Keypad N Quelle-ID** (text) — set this to a short id (e.g. `tor`,
+     `haustuer`) and put the same string in that bridge's YAML as the
+     `source_id` field on its `on_unlock`/`on_lock`/`on_doorbell` events
+     (see the example below). This is how the router tells two keypads
+     apart when both fire the same event type.
+   - **Keypad N Person M Schloss 1/2/3** (select) — up to three locks that
+     *this keypad* triggers when it recognizes person M.
+   - **Keypad N Person M Aktion** (select) — Öffnen / Entriegeln /
+     Verriegeln, applied to every lock configured above for that
+     keypad+person pair.
 
-No YAML, no options flow — just fill in the entities.
+No YAML-based configuration, no options flow — just fill in the entities.
+The only YAML involved is the bridge's own ESPHome config, which needs a
+`source_id` in its event data to distinguish keypads:
+
+```yaml
+switchbot_keypad_bridge:
+  on_unlock:
+    - homeassistant.event:
+        event: esphome.switchbot_keypad_unlock  # same event name on every bridge
+        data:
+          method: !lambda 'return method;'
+          index: !lambda 'return to_string(index);'
+          source_id: "haustuer"  # matches this bridge's "Keypad N Quelle-ID"
+  on_lock:
+    - homeassistant.event:
+        event: esphome.switchbot_keypad_lock
+        data:
+          source_id: "haustuer"
+  on_doorbell:
+    - homeassistant.event:
+        event: esphome.switchbot_keypad_doorbell
+        data:
+          source_id: "haustuer"
+```
+
+All bridges use the **same** event names (so they share one person table
+and one access log) but each bridge's own fixed `source_id` string.
 
 ## Example dashboard
 
@@ -106,14 +153,22 @@ sections:
         entities:
           - entity: switch.keypad_person_router_person_1_aktiv
             name: Aktiv
-          - entity: select.switchbot_vision_keypad_ultra_customizer_person_1_schloss_1
-            name: Schloss 1
-          - entity: select.switchbot_vision_keypad_ultra_customizer_person_1_schloss_2
-            name: Schloss 2
-          - entity: select.switchbot_vision_keypad_ultra_customizer_danny_aktion
-            name: Aktion
           - entity: select.switchbot_vision_keypad_ultra_customizer_person_1_skript
             name: Skript
+          - entity: text.switchbot_vision_keypad_ultra_customizer_keypad_1_quelle_id
+            name: "Keypad 1 (Quelle-ID)"
+          - entity: select.switchbot_vision_keypad_ultra_customizer_keypad_1_person_1_schloss_1
+            name: "Keypad 1 → Schloss 1"
+          - entity: select.switchbot_vision_keypad_ultra_customizer_keypad_1_person_1_schloss_2
+            name: "Keypad 1 → Schloss 2"
+          - entity: select.switchbot_vision_keypad_ultra_customizer_keypad_1_person_1_aktion
+            name: "Keypad 1 → Aktion"
+          - entity: text.switchbot_vision_keypad_ultra_customizer_keypad_2_quelle_id
+            name: "Keypad 2 (Quelle-ID)"
+          - entity: select.switchbot_vision_keypad_ultra_customizer_keypad_2_person_1_schloss_1
+            name: "Keypad 2 → Schloss 1"
+          - entity: select.switchbot_vision_keypad_ultra_customizer_keypad_2_person_1_aktion
+            name: "Keypad 2 → Aktion"
   - type: grid
     cards:
       - type: heading

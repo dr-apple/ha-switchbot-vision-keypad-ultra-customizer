@@ -22,6 +22,9 @@ from homeassistant.helpers import entity_registry as er
 from .const import (
     CONF_CREDENTIALS,
     CONF_DOORBELL_EVENT,
+    CONF_KEYPAD_PERSONS,
+    CONF_KEYPAD_SOURCE_ID,
+    CONF_KEYPADS,
     CONF_LOCK_EVENT,
     CONF_LOGBOOK_NAME,
     CONF_NOTIFY_TARGET,
@@ -37,6 +40,7 @@ from .const import (
     DEFAULT_LOGBOOK_NAME,
     DEFAULT_UNLOCK_EVENT,
     DOMAIN,
+    KEYPAD_KEYS,
     LOCK_SLOT_KEYS,
     METHOD_LABELS,
     REARM_DELAY_SECONDS,
@@ -95,11 +99,29 @@ class KeypadRouter:
 
     def _first_lock_entity(self) -> str | None:
         """Any configured lock, just to group Logbook entries under a real device."""
-        persons = self.entry.options.get(CONF_PERSONS, {})
-        for person in persons.values():
-            for slot in LOCK_SLOT_KEYS:
-                if lock_entity := person.get(f"{CONF_PERSON_LOCK_PREFIX}{slot}"):
-                    return lock_entity
+        keypads = self.entry.options.get(CONF_KEYPADS, {})
+        for keypad in keypads.values():
+            for person_lock_config in keypad.get(CONF_KEYPAD_PERSONS, {}).values():
+                for slot in LOCK_SLOT_KEYS:
+                    if lock_entity := person_lock_config.get(f"{CONF_PERSON_LOCK_PREFIX}{slot}"):
+                        return lock_entity
+        return None
+
+    def _keypad_key_for_source(self, source_id: str | None) -> str | None:
+        """Which configured keypad slot a "source_id" event field belongs to.
+
+        A missing `source_id` (a bridge running firmware from before this
+        field existed) resolves to keypad slot 1 -- the same slot a
+        single-keypad setup was implicitly using -- so updating this
+        integration alone never breaks an existing bridge that hasn't been
+        reflashed yet.
+        """
+        keypads = self.entry.options.get(CONF_KEYPADS, {})
+        if not source_id:
+            return KEYPAD_KEYS[0] if KEYPAD_KEYS else None
+        for keypad_key, keypad in keypads.items():
+            if keypad.get(CONF_KEYPAD_SOURCE_ID) == source_id:
+                return keypad_key
         return None
 
     def _logbook_target(self) -> dict:
@@ -216,6 +238,7 @@ class KeypadRouter:
     async def handle_unlock(self, event: Event) -> None:
         method = event.data.get("method", "unknown")
         index = event.data.get("index")
+        source_id = event.data.get("source_id")
         method_label = METHOD_LABELS.get(method, method)
         name, person_key, person = self._resolve_person(method, index)
         display_name = name or f"{UNKNOWN_PERSON_LABEL} ({method_label} Slot {index})"
@@ -231,28 +254,38 @@ class KeypadRouter:
             _LOGGER.info("Keypad Router: %s is disabled, skipping action", display_name)
             return
 
-        lock_action = person.get(CONF_PERSON_LOCK_ACTION, "open")
-        for slot in LOCK_SLOT_KEYS:
-            lock_entity = person.get(f"{CONF_PERSON_LOCK_PREFIX}{slot}")
-            if lock_entity:
-                if not self._door_closed_for_lock(lock_entity):
-                    _LOGGER.info(
-                        "Keypad Router: door open for %s, skipping unlock action",
-                        lock_entity,
-                    )
-                    await self._log(
-                        f"{display_name}: Tür an {lock_entity} war offen -- nicht entriegelt"
-                    )
-                    continue
-                action = self._lock_action_for(lock_entity, lock_action)
-                try:
-                    await self.hass.services.async_call(
-                        "lock", action, {"entity_id": lock_entity}, blocking=True
-                    )
-                except Exception:
-                    _LOGGER.exception(
-                        "Keypad Router: %s on %s failed", action, lock_entity
-                    )
+        keypad_key = self._keypad_key_for_source(source_id)
+        if keypad_key is None:
+            _LOGGER.warning(
+                "Keypad Router: event source_id %r matches no configured keypad, "
+                "no lock action taken (set a matching Quelle-ID text entity)",
+                source_id,
+            )
+        else:
+            keypad = self.entry.options.get(CONF_KEYPADS, {}).get(keypad_key, {})
+            lock_config = keypad.get(CONF_KEYPAD_PERSONS, {}).get(person_key, {})
+            lock_action = lock_config.get(CONF_PERSON_LOCK_ACTION, "open")
+            for slot in LOCK_SLOT_KEYS:
+                lock_entity = lock_config.get(f"{CONF_PERSON_LOCK_PREFIX}{slot}")
+                if lock_entity:
+                    if not self._door_closed_for_lock(lock_entity):
+                        _LOGGER.info(
+                            "Keypad Router: door open for %s, skipping unlock action",
+                            lock_entity,
+                        )
+                        await self._log(
+                            f"{display_name}: Tür an {lock_entity} war offen -- nicht entriegelt"
+                        )
+                        continue
+                    action = self._lock_action_for(lock_entity, lock_action)
+                    try:
+                        await self.hass.services.async_call(
+                            "lock", action, {"entity_id": lock_entity}, blocking=True
+                        )
+                    except Exception:
+                        _LOGGER.exception(
+                            "Keypad Router: %s on %s failed", action, lock_entity
+                        )
 
         if script_entity := person.get(CONF_PERSON_SCRIPT):
             await self.hass.services.async_call(

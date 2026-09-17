@@ -13,11 +13,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import timedelta
 
 from homeassistant.components.lock import LockEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_CREDENTIALS,
@@ -40,6 +42,7 @@ from .const import (
     DEFAULT_LOGBOOK_NAME,
     DEFAULT_UNLOCK_EVENT,
     DOMAIN,
+    DOOR_STABLE_SECONDS,
     KEYPAD_KEYS,
     LOCK_SLOT_KEYS,
     METHOD_LABELS,
@@ -214,6 +217,14 @@ class KeypadRouter:
         run it. Fails open (True) when the lock has no device link or no
         `device_class: door` sibling -- e.g. locks without a built-in
         sensor -- so those keep working exactly as before.
+
+        Some of these BLE door sensors flap between open/closed for a
+        second or two at a time (bad magnet alignment, RF noise) even while
+        the door is genuinely in one state. A bare `state.state != "on"`
+        read is a coin flip if it happens to land mid-flap, so this also
+        requires the "closed" reading to have held for DOOR_STABLE_SECONDS
+        -- filters that noise without meaningfully delaying a real unlock,
+        since normal closed periods last far longer than the flaps do.
         """
         registry = er.async_get(self.hass)
         lock_reg_entry = registry.async_get(lock_entity)
@@ -233,7 +244,12 @@ class KeypadRouter:
         if door_entry is None:
             return True
         state = self.hass.states.get(door_entry.entity_id)
-        return state is None or state.state != "on"
+        if state is None:
+            return True
+        if state.state == "on":
+            return False
+        stable_for = dt_util.utcnow() - state.last_changed
+        return stable_for >= timedelta(seconds=DOOR_STABLE_SECONDS)
 
     async def handle_unlock(self, event: Event) -> None:
         method = event.data.get("method", "unknown")

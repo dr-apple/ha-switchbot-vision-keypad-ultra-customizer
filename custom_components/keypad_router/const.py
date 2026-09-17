@@ -68,6 +68,12 @@ CONF_KEYPAD_PERSONS = "persons"  # nested: [person_key] -> {lock_1/2/3, lock_act
 # (re-uses LOCK_SLOT_KEYS / CONF_PERSON_LOCK_PREFIX / CONF_PERSON_LOCK_ACTION
 # for the keys *inside* that nested per-person dict)
 
+# A door-contact binary_sensor must report "closed" continuously for at
+# least this long before a lock action is allowed to proceed -- filters
+# brief open/closed flaps from noisy BLE contact sensors without adding a
+# noticeable delay to a genuinely closed door.
+DOOR_STABLE_SECONDS = 5
+
 UNKNOWN_PERSON_LABEL = "Unbekannt"
 
 NONE_OPTION = "— keine —"

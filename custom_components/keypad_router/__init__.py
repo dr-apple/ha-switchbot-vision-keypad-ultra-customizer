@@ -60,12 +60,13 @@ from .util import resolve_rearm_button
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["switch", "select", "text", "button"]
+PLATFORMS = ["switch", "select", "text", "button", "sensor"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Router (and its hass.data entry) must exist before platform setup --
-    # button.py looks it up there to wire the doorbell buttons to it.
+    # button.py and sensor.py look it up there to wire the doorbell
+    # buttons / last-access sensors to it.
     router = KeypadRouter(hass, entry)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"router": router}
 
@@ -113,6 +114,10 @@ class KeypadRouter:
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self.hass = hass
         self.entry = entry
+        self._last_access_sensors: dict[str, object] = {}
+
+    def register_last_access_sensors(self, sensors: dict[str, object]) -> None:
+        self._last_access_sensors = sensors
 
     def _first_lock_entity(self) -> str | None:
         """Any configured lock, just to group Logbook entries under a real device."""
@@ -336,6 +341,15 @@ class KeypadRouter:
         await self._log(f"{display_name} hat an {keypad_label} per {method_label} aufgeschlossen")
         await self._notify(f"{keypad_label} entriegelt", f"{display_name} · {method_label}")
         self.hass.async_create_task(self._rearm_after_delay())
+
+        if keypad_key is not None and (sensor := self._last_access_sensors.get(keypad_key)):
+            sensor.record_access(
+                display_name=display_name,
+                method=method,
+                method_label=method_label,
+                credential_index=str(index) if index is not None else None,
+                person_key=person_key,
+            )
 
         if person_key is None:
             return  # nothing configured for this credential -- log only

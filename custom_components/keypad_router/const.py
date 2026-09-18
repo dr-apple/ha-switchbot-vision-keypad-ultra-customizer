@@ -17,11 +17,12 @@ SLOTS_PER_METHOD = 6
 PERSON_KEYS = [str(i) for i in range(1, NUM_PERSONS + 1)]
 SLOT_KEYS = [str(i) for i in range(SLOTS_PER_METHOD)]
 
-LOCK_ACTIONS = ["open", "unlock", "lock"]
+LOCK_ACTIONS = ["open", "unlock", "lock", "script"]
 LOCK_ACTION_LABELS = {
     "open": "Öffnen",
     "unlock": "Entriegeln",
     "lock": "Verriegeln",
+    "script": "Skript ausführen",
 }
 
 CONF_UNLOCK_EVENT = "unlock_event"

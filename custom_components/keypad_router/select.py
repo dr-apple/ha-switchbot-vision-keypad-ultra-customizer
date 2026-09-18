@@ -56,8 +56,6 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     entities: list[SelectEntity] = []
-    for person_key in PERSON_KEYS:
-        entities.append(PersonScriptSelect(hass, entry, person_key))
     for keypad_key in KEYPAD_KEYS:
         for person_key in PERSON_KEYS:
             for lock_slot in LOCK_SLOT_KEYS:
@@ -65,6 +63,7 @@ async def async_setup_entry(
                     KeypadPersonLockSelect(hass, entry, keypad_key, person_key, lock_slot)
                 )
             entities.append(KeypadPersonActionSelect(hass, entry, keypad_key, person_key))
+            entities.append(KeypadPersonScriptSelect(hass, entry, keypad_key, person_key))
     for method in METHODS:
         for slot in SLOT_KEYS:
             entities.append(CredentialPersonSelect(hass, entry, method, slot))
@@ -112,31 +111,6 @@ class _DomainOptionsRefreshMixin:
         self.async_on_remove(
             async_track_state_removed_domain(self.hass, self._tracked_domains, _refresh)
         )
-
-
-class _BasePersonSelect(_DomainOptionsRefreshMixin, SelectEntity, RestoreEntity):
-    _attr_has_entity_name = True
-    _attr_should_poll = False
-
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, person_key: str) -> None:
-        self.hass = hass
-        self._entry = entry
-        self._person_key = person_key
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        return main_device_info(self._entry)
-
-    def _person(self) -> dict:
-        return dict(self._entry.options.get(CONF_PERSONS, {}).get(self._person_key, {}))
-
-    def _save_person(self, person: dict) -> None:
-        persons = dict(self._entry.options.get(CONF_PERSONS, {}))
-        persons[self._person_key] = person
-        new_options = dict(self._entry.options)
-        new_options[CONF_PERSONS] = persons
-        self.hass.config_entries.async_update_entry(self._entry, options=new_options)
-        self.async_write_ha_state()
 
 
 class _BaseKeypadPersonSelect(_DomainOptionsRefreshMixin, SelectEntity, RestoreEntity):
@@ -252,19 +226,27 @@ class KeypadPersonActionSelect(_BaseKeypadPersonSelect):
         self._save_keypad_person(person_lock_config)
 
 
-class PersonScriptSelect(_BasePersonSelect):
-    """An optional script to run for this person, instead of/alongside locks."""
+class KeypadPersonScriptSelect(_BaseKeypadPersonSelect):
+    """Which script to run for this person at this keypad, when Aktion is
+    set to "Skript ausführen" -- ignored otherwise. Scoped per (keypad,
+    person) like the lock slots, since a person's "run this instead of a
+    lock" script naturally differs by which door they triggered.
+    """
 
     _attr_icon = "mdi:script-text-outline"
     _tracked_domains = ("script",)
 
-    def __init__(self, hass, entry, person_key) -> None:
-        super().__init__(hass, entry, person_key)
-        self._attr_unique_id = f"{entry.entry_id}_person_{person_key}_script_select"
+    def __init__(
+        self, hass: HomeAssistant, entry: ConfigEntry, keypad_key: str, person_key: str
+    ) -> None:
+        super().__init__(hass, entry, keypad_key, person_key)
+        self._attr_unique_id = (
+            f"{entry.entry_id}_keypad_{keypad_key}_person_{person_key}_script_select"
+        )
 
     @property
     def name(self) -> str:
-        return f"Person {self._person_key} Skript"
+        return f"Keypad {self._keypad_key} Person {self._person_key} Skript"
 
     @property
     def options(self) -> list[str]:
@@ -273,12 +255,12 @@ class PersonScriptSelect(_BasePersonSelect):
 
     @property
     def current_option(self) -> str | None:
-        return self._person().get(CONF_PERSON_SCRIPT) or NONE_OPTION
+        return self._keypad_person().get(CONF_PERSON_SCRIPT) or NONE_OPTION
 
     async def async_select_option(self, option: str) -> None:
-        person = self._person()
-        person[CONF_PERSON_SCRIPT] = None if option == NONE_OPTION else option
-        self._save_person(person)
+        person_lock_config = self._keypad_person()
+        person_lock_config[CONF_PERSON_SCRIPT] = None if option == NONE_OPTION else option
+        self._save_keypad_person(person_lock_config)
 
 
 class CredentialPersonSelect(SelectEntity, RestoreEntity):

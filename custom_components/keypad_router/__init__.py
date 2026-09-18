@@ -328,7 +328,7 @@ class KeypadRouter:
         index = event.data.get("index")
         source_id = event.data.get("source_id")
         method_label = METHOD_LABELS.get(method, method)
-        name, person_key, person = self._resolve_person(method, index)
+        name, person_key, _person = self._resolve_person(method, index)
         display_name = name or f"{UNKNOWN_PERSON_LABEL} ({method_label} Slot {index})"
         keypad_key = self._keypad_key_for_source(source_id)
         keypad_label = self._keypad_display_name(keypad_key)
@@ -354,32 +354,37 @@ class KeypadRouter:
             keypad = self.entry.options.get(CONF_KEYPADS, {}).get(keypad_key, {})
             lock_config = keypad.get(CONF_KEYPAD_PERSONS, {}).get(person_key, {})
             lock_action = lock_config.get(CONF_PERSON_LOCK_ACTION, "open")
-            for slot in LOCK_SLOT_KEYS:
-                lock_entity = lock_config.get(f"{CONF_PERSON_LOCK_PREFIX}{slot}")
-                if lock_entity:
-                    if not self._door_closed_for_lock(lock_entity):
-                        _LOGGER.info(
-                            "Keypad Router: door open for %s, skipping unlock action",
-                            lock_entity,
-                        )
-                        await self._log(
-                            f"{display_name}: Tür an {lock_entity} war offen -- nicht entriegelt"
-                        )
-                        continue
-                    action = self._lock_action_for(lock_entity, lock_action)
-                    try:
-                        await self.hass.services.async_call(
-                            "lock", action, {"entity_id": lock_entity}, blocking=True
-                        )
-                    except Exception:
-                        _LOGGER.exception(
-                            "Keypad Router: %s on %s failed", action, lock_entity
-                        )
-
-        if script_entity := person.get(CONF_PERSON_SCRIPT):
-            await self.hass.services.async_call(
-                "script", "turn_on", {"entity_id": script_entity}, blocking=False
-            )
+            if lock_action == "script":
+                # "Skript ausführen" replaces the lock actions entirely for
+                # this keypad×person, rather than running alongside them --
+                # a person can still have plain lock actions on other
+                # keypads they're recognized at.
+                if script_entity := lock_config.get(CONF_PERSON_SCRIPT):
+                    await self.hass.services.async_call(
+                        "script", "turn_on", {"entity_id": script_entity}, blocking=False
+                    )
+            else:
+                for slot in LOCK_SLOT_KEYS:
+                    lock_entity = lock_config.get(f"{CONF_PERSON_LOCK_PREFIX}{slot}")
+                    if lock_entity:
+                        if not self._door_closed_for_lock(lock_entity):
+                            _LOGGER.info(
+                                "Keypad Router: door open for %s, skipping unlock action",
+                                lock_entity,
+                            )
+                            await self._log(
+                                f"{display_name}: Tür an {lock_entity} war offen -- nicht entriegelt"
+                            )
+                            continue
+                        action = self._lock_action_for(lock_entity, lock_action)
+                        try:
+                            await self.hass.services.async_call(
+                                "lock", action, {"entity_id": lock_entity}, blocking=True
+                            )
+                        except Exception:
+                            _LOGGER.exception(
+                                "Keypad Router: %s on %s failed", action, lock_entity
+                            )
 
     async def handle_lock(self, event: Event) -> None:
         keypad_key = self._keypad_key_for_source(event.data.get("source_id"))

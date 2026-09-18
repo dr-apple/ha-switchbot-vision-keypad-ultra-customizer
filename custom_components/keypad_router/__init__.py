@@ -54,13 +54,17 @@ from .util import resolve_rearm_button
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = ["switch", "select", "text"]
+PLATFORMS = ["switch", "select", "text", "button"]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    # Router (and its hass.data entry) must exist before platform setup --
+    # button.py looks it up there to wire the doorbell buttons to it.
+    router = KeypadRouter(hass, entry)
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"router": router}
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    router = KeypadRouter(hass, entry)
     unsub_unlock = hass.bus.async_listen(
         entry.data.get(CONF_UNLOCK_EVENT, DEFAULT_UNLOCK_EVENT), router.handle_unlock
     )
@@ -74,9 +78,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     unsub_options = entry.add_update_listener(_async_options_updated)
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
-        "unsub": [unsub_unlock, unsub_lock, unsub_doorbell, unsub_options],
-    }
+    hass.data[DOMAIN][entry.entry_id]["unsub"] = [
+        unsub_unlock,
+        unsub_lock,
+        unsub_doorbell,
+        unsub_options,
+    ]
     return True
 
 
@@ -333,6 +340,19 @@ class KeypadRouter:
 
     async def handle_doorbell(self, event: Event) -> None:
         keypad_key = self._keypad_key_for_source(event.data.get("source_id"))
+        await self._fire_doorbell(keypad_key)
+
+    async def trigger_doorbell(self, keypad_key: str) -> None:
+        """Manually fire the doorbell log/notify for one keypad.
+
+        Used by the "Keypad N Klingel" button so pressing it in HA behaves
+        exactly like a real doorbell press at that physical keypad --
+        useful for testing the notification/automation without walking to
+        the door.
+        """
+        await self._fire_doorbell(keypad_key)
+
+    async def _fire_doorbell(self, keypad_key: str | None) -> None:
         keypad_label = self._keypad_display_name(keypad_key)
         await self._log(f"Es hat an {keypad_label} geklingelt (Keypad Vision)")
         await self._notify(f"Klingel {keypad_label}", f"Jemand steht an {keypad_label} (Keypad Vision)")

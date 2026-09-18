@@ -65,6 +65,7 @@ KEYPAD_KEYS = [str(i) for i in range(1, NUM_KEYPADS + 1)]
 CONF_KEYPADS = "keypads"
 # Per-keypad option keys (nested under CONF_KEYPADS[<keypad_key>])
 CONF_KEYPAD_SOURCE_ID = "source_id"  # must match the incoming event's "source_id" field
+CONF_KEYPAD_NAME = "name"  # display name used in push/logbook text, e.g. "Tor"
 CONF_KEYPAD_PERSONS = "persons"  # nested: [person_key] -> {lock_1/2/3, lock_action}
 # (re-uses LOCK_SLOT_KEYS / CONF_PERSON_LOCK_PREFIX / CONF_PERSON_LOCK_ACTION
 # for the keys *inside* that nested per-person dict)

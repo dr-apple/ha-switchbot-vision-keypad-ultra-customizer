@@ -9,6 +9,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
+    CONF_KEYPAD_NAME,
     CONF_KEYPAD_SOURCE_ID,
     CONF_KEYPADS,
     CONF_PERSON_NAME,
@@ -25,7 +26,9 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     entities = [PersonNameText(hass, entry, key) for key in PERSON_KEYS]
-    entities += [KeypadSourceIdText(hass, entry, key) for key in KEYPAD_KEYS]
+    for key in KEYPAD_KEYS:
+        entities.append(KeypadNameText(hass, entry, key))
+        entities.append(KeypadSourceIdText(hass, entry, key))
     async_add_entities(entities)
 
 
@@ -68,6 +71,52 @@ class PersonNameText(TextEntity, RestoreEntity):
         persons[self._person_key] = person
         new_options = dict(self._entry.options)
         new_options[CONF_PERSONS] = persons
+        self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+        self.async_write_ha_state()
+
+
+class KeypadNameText(TextEntity, RestoreEntity):
+    """Display name for this keypad, used in push notifications and the
+    Logbook (e.g. "Tor", "Haustür") so it's clear which door an unlock/lock/
+    doorbell event came from. Falls back to "Keypad N" when left blank.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_icon = "mdi:rename-box"
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, keypad_key: str) -> None:
+        self.hass = hass
+        self._entry = entry
+        self._keypad_key = keypad_key
+        self._attr_unique_id = f"{entry.entry_id}_keypad_{keypad_key}_name"
+        self._attr_native_value = ""
+
+    @property
+    def name(self) -> str:
+        return f"Keypad {self._keypad_key} Name"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return keypad_device_info(self._entry, self._keypad_key)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        keypads = self._entry.options.get(CONF_KEYPADS, {})
+        stored = keypads.get(self._keypad_key, {}).get(CONF_KEYPAD_NAME, "")
+        if stored:
+            self._attr_native_value = stored
+        elif (last_state := await self.async_get_last_state()) is not None:
+            self._attr_native_value = last_state.state
+
+    async def async_set_value(self, value: str) -> None:
+        self._attr_native_value = value
+        keypads = {k: dict(v) for k, v in self._entry.options.get(CONF_KEYPADS, {}).items()}
+        keypad = dict(keypads.get(self._keypad_key, {}))
+        keypad[CONF_KEYPAD_NAME] = value.strip()
+        keypads[self._keypad_key] = keypad
+        new_options = dict(self._entry.options)
+        new_options[CONF_KEYPADS] = keypads
         self.hass.config_entries.async_update_entry(self._entry, options=new_options)
         self.async_write_ha_state()
 

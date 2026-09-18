@@ -24,6 +24,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_CREDENTIALS,
     CONF_DOORBELL_EVENT,
+    CONF_KEYPAD_NAME,
     CONF_KEYPAD_PERSONS,
     CONF_KEYPAD_SOURCE_ID,
     CONF_KEYPADS,
@@ -109,6 +110,22 @@ class KeypadRouter:
                     if lock_entity := person_lock_config.get(f"{CONF_PERSON_LOCK_PREFIX}{slot}"):
                         return lock_entity
         return None
+
+    def _keypad_display_name(self, keypad_key: str | None) -> str:
+        """Human-readable label for a keypad, for push/Logbook text.
+
+        Uses the "Keypad N Name" text if set, else falls back to the
+        source_id, else "Keypad N" -- always something rather than nothing,
+        even for a keypad that hasn't been named yet.
+        """
+        if keypad_key is None:
+            return "Unbekanntes Keypad"
+        keypad = self.entry.options.get(CONF_KEYPADS, {}).get(keypad_key, {})
+        name = keypad.get(CONF_KEYPAD_NAME, "").strip()
+        if name:
+            return name
+        source_id = keypad.get(CONF_KEYPAD_SOURCE_ID, "").strip()
+        return source_id or f"Keypad {keypad_key}"
 
     def _keypad_key_for_source(self, source_id: str | None) -> str | None:
         """Which configured keypad slot a "source_id" event field belongs to.
@@ -258,9 +275,11 @@ class KeypadRouter:
         method_label = METHOD_LABELS.get(method, method)
         name, person_key, person = self._resolve_person(method, index)
         display_name = name or f"{UNKNOWN_PERSON_LABEL} ({method_label} Slot {index})"
+        keypad_key = self._keypad_key_for_source(source_id)
+        keypad_label = self._keypad_display_name(keypad_key)
 
-        await self._log(f"{display_name} hat per {method_label} aufgeschlossen")
-        await self._notify("Tor entriegelt", f"{display_name} · {method_label}")
+        await self._log(f"{display_name} hat an {keypad_label} per {method_label} aufgeschlossen")
+        await self._notify(f"{keypad_label} entriegelt", f"{display_name} · {method_label}")
         self.hass.async_create_task(self._rearm_after_delay())
 
         if person_key is None:
@@ -270,7 +289,6 @@ class KeypadRouter:
             _LOGGER.info("Keypad Router: %s is disabled, skipping action", display_name)
             return
 
-        keypad_key = self._keypad_key_for_source(source_id)
         if keypad_key is None:
             _LOGGER.warning(
                 "Keypad Router: event source_id %r matches no configured keypad, "
@@ -309,8 +327,12 @@ class KeypadRouter:
             )
 
     async def handle_lock(self, event: Event) -> None:
-        await self._log("Tor wurde verriegelt")
+        keypad_key = self._keypad_key_for_source(event.data.get("source_id"))
+        keypad_label = self._keypad_display_name(keypad_key)
+        await self._log(f"{keypad_label} wurde verriegelt")
 
     async def handle_doorbell(self, event: Event) -> None:
-        await self._log("Es hat am Tor geklingelt (Keypad Vision)")
-        await self._notify("Klingel Tor", "Jemand steht am Tor (Keypad Vision)")
+        keypad_key = self._keypad_key_for_source(event.data.get("source_id"))
+        keypad_label = self._keypad_display_name(keypad_key)
+        await self._log(f"Es hat an {keypad_label} geklingelt (Keypad Vision)")
+        await self._notify(f"Klingel {keypad_label}", f"Jemand steht an {keypad_label} (Keypad Vision)")

@@ -13,11 +13,10 @@ from .const import (
     CONF_KEYPADS,
     CONF_PERSON_NAME,
     CONF_PERSONS,
-    DOMAIN,
-    INTEGRATION_TITLE,
     KEYPAD_KEYS,
     PERSON_KEYS,
 )
+from .util import keypad_device_info, main_device_info
 
 
 async def async_setup_entry(
@@ -50,9 +49,7 @@ class PersonNameText(TextEntity, RestoreEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry.entry_id)}, name=INTEGRATION_TITLE
-        )
+        return main_device_info(self._entry)
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -101,9 +98,7 @@ class KeypadSourceIdText(TextEntity, RestoreEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry.entry_id)}, name=INTEGRATION_TITLE
-        )
+        return keypad_device_info(self._entry, self._keypad_key)
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

@@ -30,8 +30,6 @@ from .const import (
     CONF_PERSON_SCRIPT,
     CONF_PERSONS,
     CONF_REARM_BUTTON,
-    DOMAIN,
-    INTEGRATION_TITLE,
     KEYPAD_KEYS,
     LOCK_ACTIONS,
     LOCK_ACTION_LABELS,
@@ -43,7 +41,7 @@ from .const import (
     SLOT_KEYS,
     UNASSIGNED_OPTION,
 )
-from .util import resolve_rearm_button
+from .util import keypad_device_info, main_device_info, resolve_rearm_button
 
 
 async def async_setup_entry(
@@ -118,9 +116,7 @@ class _BasePersonSelect(_DomainOptionsRefreshMixin, SelectEntity, RestoreEntity)
 
     @property
     def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry.entry_id)}, name=INTEGRATION_TITLE
-        )
+        return main_device_info(self._entry)
 
     def _person(self) -> dict:
         return dict(self._entry.options.get(CONF_PERSONS, {}).get(self._person_key, {}))
@@ -158,9 +154,7 @@ class _BaseKeypadPersonSelect(_DomainOptionsRefreshMixin, SelectEntity, RestoreE
 
     @property
     def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry.entry_id)}, name=INTEGRATION_TITLE
-        )
+        return keypad_device_info(self._entry, self._keypad_key)
 
     def _keypad_person(self) -> dict:
         keypad = self._entry.options.get(CONF_KEYPADS, {}).get(self._keypad_key, {})
@@ -300,9 +294,7 @@ class CredentialPersonSelect(SelectEntity, RestoreEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry.entry_id)}, name=INTEGRATION_TITLE
-        )
+        return main_device_info(self._entry)
 
     @property
     def options(self) -> list[str]:
@@ -365,9 +357,7 @@ class RearmButtonSelect(_DomainOptionsRefreshMixin, SelectEntity, RestoreEntity)
 
     @property
     def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry.entry_id)}, name=INTEGRATION_TITLE
-        )
+        return main_device_info(self._entry)
 
     @property
     def options(self) -> list[str]:
@@ -415,9 +405,7 @@ class NotifyTargetSelect(_DomainOptionsRefreshMixin, SelectEntity, RestoreEntity
 
     @property
     def device_info(self) -> DeviceInfo:
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._entry.entry_id)}, name=INTEGRATION_TITLE
-        )
+        return main_device_info(self._entry)
 
     @property
     def options(self) -> list[str]:

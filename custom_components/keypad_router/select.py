@@ -21,6 +21,9 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     CONF_CREDENTIALS,
+    CONF_DOOR_SENSOR_LOCK,
+    CONF_DOOR_SENSOR_SENSOR,
+    CONF_DOOR_SENSORS,
     CONF_KEYPAD_PERSONS,
     CONF_KEYPADS,
     CONF_NOTIFY_TARGET,
@@ -30,6 +33,9 @@ from .const import (
     CONF_PERSON_SCRIPT,
     CONF_PERSONS,
     CONF_REARM_BUTTON,
+    DISABLED_OPTION,
+    DOOR_SENSOR_DISABLED,
+    DOOR_SENSOR_SLOT_KEYS,
     KEYPAD_KEYS,
     LOCK_ACTIONS,
     LOCK_ACTION_LABELS,
@@ -62,6 +68,9 @@ async def async_setup_entry(
     for method in METHODS:
         for slot in SLOT_KEYS:
             entities.append(CredentialPersonSelect(hass, entry, method, slot))
+    for slot in DOOR_SENSOR_SLOT_KEYS:
+        entities.append(DoorSensorLockSelect(hass, entry, slot))
+        entities.append(DoorSensorSensorSelect(hass, entry, slot))
     entities.append(RearmButtonSelect(hass, entry))
     entities.append(NotifyTargetSelect(hass, entry))
     async_add_entities(entities)
@@ -326,6 +335,114 @@ class CredentialPersonSelect(SelectEntity, RestoreEntity):
         new_options[CONF_CREDENTIALS] = credentials
         self.hass.config_entries.async_update_entry(self._entry, options=new_options)
         self.async_write_ha_state()
+
+
+class _BaseDoorSensorSelect(_DomainOptionsRefreshMixin, SelectEntity, RestoreEntity):
+    """Base for the per-slot door-sensor mapping selects.
+
+    Locks are chosen freely per person/keypad (see KeypadPersonLockSelect),
+    so there's no fixed list of "the locks in this system" to hang a
+    per-lock sensor setting off of. Instead this is its own small table of
+    up to NUM_DOOR_SENSOR_SLOTS (lock, sensor) pairs, independent of the
+    person/keypad config, that `_door_closed_for_lock` checks by matching
+    the *lock* entity_id before falling back to auto-discovery.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, slot: str) -> None:
+        self.hass = hass
+        self._entry = entry
+        self._slot = slot
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        return main_device_info(self._entry)
+
+    def _mapping(self) -> dict:
+        return dict(self._entry.options.get(CONF_DOOR_SENSORS, {}).get(self._slot, {}))
+
+    def _save_mapping(self, mapping: dict) -> None:
+        door_sensors = {
+            k: dict(v) for k, v in self._entry.options.get(CONF_DOOR_SENSORS, {}).items()
+        }
+        door_sensors[self._slot] = mapping
+        new_options = dict(self._entry.options)
+        new_options[CONF_DOOR_SENSORS] = door_sensors
+        self.hass.config_entries.async_update_entry(self._entry, options=new_options)
+        self.async_write_ha_state()
+
+
+class DoorSensorLockSelect(_BaseDoorSensorSelect):
+    """Which lock this door-sensor mapping slot applies to."""
+
+    _attr_icon = "mdi:door"
+    _tracked_domains = ("lock",)
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, slot: str) -> None:
+        super().__init__(hass, entry, slot)
+        self._attr_unique_id = f"{entry.entry_id}_door_sensor_{slot}_lock"
+
+    @property
+    def name(self) -> str:
+        return f"Türsensor {self._slot} Schloss"
+
+    @property
+    def options(self) -> list[str]:
+        locks = sorted(self.hass.states.async_entity_ids("lock"))
+        return [NONE_OPTION, *locks]
+
+    @property
+    def current_option(self) -> str | None:
+        return self._mapping().get(CONF_DOOR_SENSOR_LOCK) or NONE_OPTION
+
+    async def async_select_option(self, option: str) -> None:
+        mapping = self._mapping()
+        mapping[CONF_DOOR_SENSOR_LOCK] = None if option == NONE_OPTION else option
+        self._save_mapping(mapping)
+
+
+class DoorSensorSensorSelect(_BaseDoorSensorSelect):
+    """The door/gate binary_sensor to check for this slot's lock.
+
+    Also offers "Deaktiviert" to turn the closed-door check off entirely
+    for that lock -- needed when the only available sensor (e.g. a lock's
+    built-in door contact) is too unreliable to gate an unlock on.
+    """
+
+    _attr_icon = "mdi:door-open"
+    _tracked_domains = ("binary_sensor",)
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, slot: str) -> None:
+        super().__init__(hass, entry, slot)
+        self._attr_unique_id = f"{entry.entry_id}_door_sensor_{slot}_sensor"
+
+    @property
+    def name(self) -> str:
+        return f"Türsensor {self._slot} Sensor"
+
+    @property
+    def options(self) -> list[str]:
+        sensors = sorted(self.hass.states.async_entity_ids("binary_sensor"))
+        return [NONE_OPTION, DISABLED_OPTION, *sensors]
+
+    @property
+    def current_option(self) -> str | None:
+        value = self._mapping().get(CONF_DOOR_SENSOR_SENSOR)
+        if value == DOOR_SENSOR_DISABLED:
+            return DISABLED_OPTION
+        return value or NONE_OPTION
+
+    async def async_select_option(self, option: str) -> None:
+        mapping = self._mapping()
+        if option == NONE_OPTION:
+            mapping[CONF_DOOR_SENSOR_SENSOR] = None
+        elif option == DISABLED_OPTION:
+            mapping[CONF_DOOR_SENSOR_SENSOR] = DOOR_SENSOR_DISABLED
+        else:
+            mapping[CONF_DOOR_SENSOR_SENSOR] = option
+        self._save_mapping(mapping)
 
 
 class RearmButtonSelect(_DomainOptionsRefreshMixin, SelectEntity, RestoreEntity):

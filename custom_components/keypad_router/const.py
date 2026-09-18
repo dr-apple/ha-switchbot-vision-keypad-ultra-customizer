@@ -76,6 +76,21 @@ CONF_KEYPAD_PERSONS = "persons"  # nested: [person_key] -> {lock_1/2/3, lock_act
 # noticeable delay to a genuinely closed door.
 DOOR_STABLE_SECONDS = 5
 
+# Explicit per-lock door-sensor overrides -- a fixed small table of
+# (lock, sensor) mappings, editable from the Router device page. Without an
+# entry here, a lock falls back to auto-discovering a `binary_sensor` sibling
+# (device_class door) on its own HA device. That auto-detected sensor isn't
+# always trustworthy (e.g. a lock's built-in door contact that flaps
+# constantly), so a mapping here can point at a better sensor instead, or
+# disable the check entirely for that lock via DOOR_SENSOR_DISABLED.
+NUM_DOOR_SENSOR_SLOTS = 4
+DOOR_SENSOR_SLOT_KEYS = [str(i) for i in range(1, NUM_DOOR_SENSOR_SLOTS + 1)]
+CONF_DOOR_SENSORS = "door_sensors"
+CONF_DOOR_SENSOR_LOCK = "lock"
+CONF_DOOR_SENSOR_SENSOR = "sensor"
+DOOR_SENSOR_DISABLED = "__disabled__"
+DISABLED_OPTION = "— Deaktiviert (keine Prüfung) —"
+
 UNKNOWN_PERSON_LABEL = "Unbekannt"
 
 NONE_OPTION = "— keine —"

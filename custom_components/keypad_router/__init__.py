@@ -23,6 +23,9 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_CREDENTIALS,
+    CONF_DOOR_SENSOR_LOCK,
+    CONF_DOOR_SENSOR_SENSOR,
+    CONF_DOOR_SENSORS,
     CONF_DOORBELL_EVENT,
     CONF_KEYPAD_NAME,
     CONF_KEYPAD_PERSONS,
@@ -43,6 +46,7 @@ from .const import (
     DEFAULT_LOGBOOK_NAME,
     DEFAULT_UNLOCK_EVENT,
     DOMAIN,
+    DOOR_SENSOR_DISABLED,
     DOOR_STABLE_SECONDS,
     KEYPAD_KEYS,
     LOCK_SLOT_KEYS,
@@ -230,30 +234,32 @@ class KeypadRouter:
         state = self.hass.states.get(entity_id)
         return state is None or state.state != "off"
 
-    def _door_closed_for_lock(self, lock_entity: str) -> bool:
-        """Whether the door/gate belonging to `lock_entity` is closed.
+    def _door_sensor_override(self, lock_entity: str) -> str | None:
+        """The mapped door-sensor entity_id for `lock_entity`, if any.
+
+        Returns DOOR_SENSOR_DISABLED if a "Türsensor N" mapping names this
+        lock but has its sensor explicitly set to "Deaktiviert", the mapped
+        sensor's entity_id if one is set, or None if no mapping names this
+        lock at all (caller should fall back to auto-discovery).
+        """
+        for mapping in self.entry.options.get(CONF_DOOR_SENSORS, {}).values():
+            if mapping.get(CONF_DOOR_SENSOR_LOCK) == lock_entity:
+                return mapping.get(CONF_DOOR_SENSOR_SENSOR) or None
+        return None
+
+    def _auto_door_sensor(self, lock_entity: str) -> str | None:
+        """Auto-detected door-contact sibling for `lock_entity`, if any.
 
         Many SwitchBot locks (Lock Ultra, Lock Pro) expose their own
         integrated door-contact sensor as a sibling `binary_sensor` on the
-        same HA device. Unlocking while that door is already open is
-        pointless (nothing to open) and can leave the lock's bolt in a
-        confused position, so this is used to skip the action rather than
-        run it. Fails open (True) when the lock has no device link or no
-        `device_class: door` sibling -- e.g. locks without a built-in
-        sensor -- so those keep working exactly as before.
-
-        Some of these BLE door sensors flap between open/closed for a
-        second or two at a time (bad magnet alignment, RF noise) even while
-        the door is genuinely in one state. A bare `state.state != "on"`
-        read is a coin flip if it happens to land mid-flap, so this also
-        requires the "closed" reading to have held for DOOR_STABLE_SECONDS
-        -- filters that noise without meaningfully delaying a real unlock,
-        since normal closed periods last far longer than the flaps do.
+        same HA device. Returns None when the lock has no device link or
+        no `device_class: door` sibling -- e.g. locks without a built-in
+        sensor.
         """
         registry = er.async_get(self.hass)
         lock_reg_entry = registry.async_get(lock_entity)
         if lock_reg_entry is None or lock_reg_entry.device_id is None:
-            return True
+            return None
         door_entry = next(
             (
                 e
@@ -265,9 +271,41 @@ class KeypadRouter:
             ),
             None,
         )
-        if door_entry is None:
+        return door_entry.entity_id if door_entry else None
+
+    def _door_closed_for_lock(self, lock_entity: str) -> bool:
+        """Whether the door/gate belonging to `lock_entity` is closed.
+
+        Unlocking while that door is already open is pointless (nothing to
+        open) and can leave the lock's bolt in a confused position, so this
+        is used to skip the action rather than run it.
+
+        A "Türsensor N" mapping for this lock, if configured, always wins
+        over auto-discovery -- some locks' built-in door contacts (or other
+        BLE contact sensors) flap open/closed for a second or two at a time
+        (bad magnet alignment, RF noise) even while the door is genuinely
+        in one state, which makes them useless for gating an unlock; a
+        mapping lets a better sensor be picked, or the check disabled
+        entirely for that lock. Without a mapping, falls back to
+        auto-discovering a `binary_sensor` sibling on the lock's own HA
+        device. Fails open (True) when neither finds a sensor, so locks
+        without any door sensor keep working exactly as before.
+
+        Once a sensor entity_id is settled on, a bare `state.state != "on"`
+        read would still be a coin flip if it happens to land mid-flap, so
+        this also requires the "closed" reading to have held for
+        DOOR_STABLE_SECONDS -- filters that noise without meaningfully
+        delaying a real unlock, since normal closed periods last far
+        longer than the flaps do.
+        """
+        door_entity_id = self._door_sensor_override(lock_entity)
+        if door_entity_id == DOOR_SENSOR_DISABLED:
             return True
-        state = self.hass.states.get(door_entry.entity_id)
+        if door_entity_id is None:
+            door_entity_id = self._auto_door_sensor(lock_entity)
+        if door_entity_id is None:
+            return True
+        state = self.hass.states.get(door_entity_id)
         if state is None:
             return True
         if state.state == "on":

@@ -90,6 +90,13 @@ CONF_DOOR_SENSOR_LOCK = "lock"
 CONF_DOOR_SENSOR_SENSOR = "sensor"
 DOOR_SENSOR_DISABLED = "__disabled__"
 DISABLED_OPTION = "— Deaktiviert (keine Prüfung) —"
+# A mapped sensor can be a `binary_sensor` (on/off) or a plain `sensor`
+# whose state is a word meaning open/closed -- e.g. a template sensor built
+# from a lock's own attributes, in German or English. Anything else is an
+# unrecognized reading, which fails open (treated as "can't tell, allow the
+# unlock") rather than blocking on a sensor whose vocabulary isn't known.
+DOOR_OPEN_VALUES = {"on", "open", "offen", "auf"}
+DOOR_CLOSED_VALUES = {"off", "closed", "geschlossen", "zu"}
 
 UNKNOWN_PERSON_LABEL = "Unbekannt"
 

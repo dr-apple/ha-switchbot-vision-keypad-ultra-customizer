@@ -404,15 +404,19 @@ class DoorSensorLockSelect(_BaseDoorSensorSelect):
 
 
 class DoorSensorSensorSelect(_BaseDoorSensorSelect):
-    """The door/gate binary_sensor to check for this slot's lock.
+    """The door/gate sensor to check for this slot's lock.
 
-    Also offers "Deaktiviert" to turn the closed-door check off entirely
-    for that lock -- needed when the only available sensor (e.g. a lock's
-    built-in door contact) is too unreliable to gate an unlock on.
+    Lists both `binary_sensor` entities (on/off) and plain `sensor`
+    entities whose state is a recognized open/closed word -- e.g. a
+    template sensor exposing "Offen"/"Geschlossen" -- since not every
+    door/gate contact is modeled as a binary_sensor. Also offers
+    "Deaktiviert" to turn the closed-door check off entirely for that lock
+    -- needed when the only available sensor (e.g. a lock's built-in door
+    contact) is too unreliable to gate an unlock on.
     """
 
     _attr_icon = "mdi:door-open"
-    _tracked_domains = ("binary_sensor",)
+    _tracked_domains = ("binary_sensor", "sensor")
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry, slot: str) -> None:
         super().__init__(hass, entry, slot)
@@ -424,7 +428,12 @@ class DoorSensorSensorSelect(_BaseDoorSensorSelect):
 
     @property
     def options(self) -> list[str]:
-        sensors = sorted(self.hass.states.async_entity_ids("binary_sensor"))
+        sensors = sorted(
+            {
+                *self.hass.states.async_entity_ids("binary_sensor"),
+                *self.hass.states.async_entity_ids("sensor"),
+            }
+        )
         return [NONE_OPTION, DISABLED_OPTION, *sensors]
 
     @property

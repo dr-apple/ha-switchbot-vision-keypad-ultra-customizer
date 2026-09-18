@@ -46,6 +46,8 @@ from .const import (
     DEFAULT_LOGBOOK_NAME,
     DEFAULT_UNLOCK_EVENT,
     DOMAIN,
+    DOOR_CLOSED_VALUES,
+    DOOR_OPEN_VALUES,
     DOOR_SENSOR_DISABLED,
     DOOR_STABLE_SECONDS,
     KEYPAD_KEYS,
@@ -291,12 +293,17 @@ class KeypadRouter:
         device. Fails open (True) when neither finds a sensor, so locks
         without any door sensor keep working exactly as before.
 
-        Once a sensor entity_id is settled on, a bare `state.state != "on"`
-        read would still be a coin flip if it happens to land mid-flap, so
-        this also requires the "closed" reading to have held for
-        DOOR_STABLE_SECONDS -- filters that noise without meaningfully
+        Once a sensor entity_id is settled on, a bare "is it closed right
+        now" read would still be a coin flip if it happens to land
+        mid-flap, so this also requires the "closed" reading to have held
+        for DOOR_STABLE_SECONDS -- filters that noise without meaningfully
         delaying a real unlock, since normal closed periods last far
         longer than the flaps do.
+
+        A mapped sensor doesn't have to be a `binary_sensor` -- a plain
+        `sensor` whose state is a recognized open/closed word (German or
+        English, see DOOR_OPEN_VALUES/DOOR_CLOSED_VALUES) works the same
+        way. An unrecognized state fails open, same as no sensor at all.
         """
         door_entity_id = self._door_sensor_override(lock_entity)
         if door_entity_id == DOOR_SENSOR_DISABLED:
@@ -308,8 +315,11 @@ class KeypadRouter:
         state = self.hass.states.get(door_entity_id)
         if state is None:
             return True
-        if state.state == "on":
+        value = state.state.strip().lower()
+        if value in DOOR_OPEN_VALUES:
             return False
+        if value not in DOOR_CLOSED_VALUES:
+            return True
         stable_for = dt_util.utcnow() - state.last_changed
         return stable_for >= timedelta(seconds=DOOR_STABLE_SECONDS)
 

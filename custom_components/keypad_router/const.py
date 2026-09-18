@@ -3,12 +3,13 @@
 DOMAIN = "keypad_router"
 INTEGRATION_TITLE = "SwitchBot Vision Keypad Ultra Customizer"
 
-METHODS = ["pin", "nfc", "fingerprint", "face"]
+METHODS = ["pin", "nfc", "fingerprint", "face", "palm"]
 METHOD_LABELS = {
     "pin": "PIN",
     "nfc": "NFC",
     "fingerprint": "Fingerabdruck",
     "face": "Gesicht",
+    "palm": "Handvene",
 }
 
 NUM_PERSONS = 6

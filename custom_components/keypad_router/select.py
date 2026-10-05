@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import (
+    async_call_later,
     async_track_state_added_domain,
     async_track_state_removed_domain,
 )
@@ -80,6 +81,14 @@ def _person_display(entry: ConfigEntry, key: str) -> str:
     return name if name else f"Person {key}"
 
 
+# How long to wait before re-reading a domain's entity list after an entity
+# appeared/disappeared. Entities that come and go constantly (BLE
+# trackers, ...) would otherwise rewrite the state -- and its options
+# attribute, which can list thousands of entities -- several times per
+# second, flooding the event bus and the recorder.
+OPTIONS_REFRESH_DELAY = 30
+
+
 class _DomainOptionsRefreshMixin:
     """Keep `options` live when it lists every entity of a given domain.
 
@@ -92,9 +101,15 @@ class _DomainOptionsRefreshMixin:
     nothing to prompt another write, stays that way -- shown as the
     picked value going "unknown" because it's no longer in that frozen
     list, even though the entity itself still exists.
+
+    Refreshes are coalesced: the first add/remove event starts a short
+    timer, further events during that window are ignored, and when it
+    fires the list is re-read and the state is only written if the
+    options actually differ from what is currently published.
     """
 
     _tracked_domains: tuple[str, ...] = ()
+    _refresh_cancel = None
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -102,8 +117,29 @@ class _DomainOptionsRefreshMixin:
             return
 
         @callback
-        def _refresh(_event) -> None:
+        def _flush(_now) -> None:
+            self._refresh_cancel = None
+            if self.hass is None or self.entity_id is None:
+                return
+            current = self.hass.states.get(self.entity_id)
+            published = current.attributes.get("options") if current else None
+            if published is not None and list(published) == list(self.options):
+                return
             self.async_write_ha_state()
+
+        @callback
+        def _refresh(_event) -> None:
+            if self._refresh_cancel is not None:
+                return
+            self._refresh_cancel = async_call_later(
+                self.hass, OPTIONS_REFRESH_DELAY, _flush
+            )
+
+        @callback
+        def _cancel_pending() -> None:
+            if self._refresh_cancel is not None:
+                self._refresh_cancel()
+                self._refresh_cancel = None
 
         self.async_on_remove(
             async_track_state_added_domain(self.hass, self._tracked_domains, _refresh)
@@ -111,6 +147,7 @@ class _DomainOptionsRefreshMixin:
         self.async_on_remove(
             async_track_state_removed_domain(self.hass, self._tracked_domains, _refresh)
         )
+        self.async_on_remove(_cancel_pending)
 
 
 class _BaseKeypadPersonSelect(_DomainOptionsRefreshMixin, SelectEntity, RestoreEntity):

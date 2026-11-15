@@ -59,6 +59,10 @@ Den Ordner `custom_components/keypad_router` nach `config/custom_components/` ko
 
 *Illustration – Ausschnitt der Geräteseite mit Beispielwerten.*
 
+![Geräteseite mit dem Credential-Raster](docs/images/ha-device-page.png)
+
+*Echter Screenshot aus einer Home-Assistant-Installation (persönliche Daten ersetzt).*
+
 Keine YAML-Konfiguration, kein Optionsdialog – einfach die Entitäten ausfüllen. Die einzige YAML ist die ESPHome-Konfiguration der Bridge selbst; sie braucht eine `source_id` in den Event-Daten, um Keypads zu unterscheiden:
 
 ```yaml

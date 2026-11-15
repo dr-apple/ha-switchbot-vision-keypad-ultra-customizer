@@ -114,6 +114,10 @@ folder and restart Home Assistant.
 
 *Illustration – excerpt of the device page with example values.*
 
+![Device page with the credential grid](docs/images/ha-device-page.png)
+
+*Real screenshot from a Home Assistant installation (German UI, personal data replaced).*
+
 No YAML-based configuration, no options flow — just fill in the entities.
 The only YAML involved is the bridge's own ESPHome config, which needs a
 `source_id` in its event data to distinguish keypads:

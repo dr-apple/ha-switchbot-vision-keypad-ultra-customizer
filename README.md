@@ -1,5 +1,11 @@
 # SwitchBot Vision Keypad Ultra Customizer
 
+**English** · [Deutsch](README.de.md)
+
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://hacs.xyz)
+
+![SwitchBot Vision Keypad Ultra Customizer](docs/images/banner.svg)
+
 A small Home Assistant integration that sits between a keypad bridge (e.g.
 [switchbot-keypad-bridge](https://github.com/pierluigizagaria/switchbot-keypad-bridge))
 and your locks/scripts, and answers one question cleanly: **who used the
@@ -7,6 +13,10 @@ keypad, and what should happen because of it?**
 
 Despite the name, it isn't SwitchBot-specific — any integration that fires an
 event with a `method` and a credential `index` on unlock works.
+
+## How it works
+
+![Keypad → ESP32 bridge → keypad router → locks and scripts](docs/images/how-it-works.svg)
 
 ## Why
 
@@ -100,6 +110,14 @@ folder and restart Home Assistant.
      Verriegeln, applied to every lock configured above for that
      keypad+person pair.
 
+<img src="docs/images/device-page.svg" alt="Device page excerpt: person, keypad and credential-grid entities" width="460">
+
+*Illustration – excerpt of the device page with example values.*
+
+![Device page with the credential grid](docs/images/ha-device-page.png)
+
+*Real screenshot from a Home Assistant installation (German UI, personal data replaced).*
+
 No YAML-based configuration, no options flow — just fill in the entities.
 The only YAML involved is the bridge's own ESPHome config, which needs a
 `source_id` in its event data to distinguish keypads:
@@ -145,10 +163,10 @@ sections:
   - type: grid
     cards:
       - type: heading
-        heading: Danny
+        heading: Person 1
         icon: mdi:account-key
       - type: entities
-        title: Danny
+        title: Person 1
         show_header_toggle: false
         entities:
           - entity: switch.keypad_person_router_person_1_aktiv
@@ -210,7 +228,35 @@ sections:
 ```
 
 Duplicate the "Gesicht"/"Fingerabdruck" blocks for PIN and NFC, and the
-"Danny" block per person, to match how many you've actually configured.
+"Person 1" block per person, to match how many you've actually configured.
+
+## Example automation
+
+Every resolved access is in the Logbook already. If you want your own reaction on top – e.g. turn on the hallway light when anybody unlocks at night – trigger on the bridge event directly:
+
+```yaml
+triggers:
+  - trigger: event
+    event_type: esphome.switchbot_keypad_unlock
+    event_data:
+      source_id: haustuer
+conditions:
+  - condition: sun
+    after: sunset
+actions:
+  - action: light.turn_on
+    target:
+      entity_id: light.hallway
+```
+
+## Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| Access logged, but no lock action | Is the person's *aktiv* switch on? Does the event's `source_id` match *Keypad N Quelle-ID* exactly? |
+| Logged as unknown person | Assign the method + slot in the credential grid (*<Methode> Slot <N>*). |
+| No events at all | Check the bridge in *Developer tools → Events* by listening to `esphome.switchbot_keypad_unlock`. |
+| No push | Enter a notify target in the integration's setup (e.g. `notify.mobile_app_my_phone`). |
 
 ## Notes
 

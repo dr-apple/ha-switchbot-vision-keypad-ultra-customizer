@@ -48,7 +48,7 @@ class KeypadDoorbellButton(ButtonEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        return keypad_device_info(self._entry, self._keypad_key)
+        return keypad_device_info(self.hass, self._entry, self._keypad_key)
 
     async def async_press(self) -> None:
         await self._router.trigger_doorbell(self._keypad_key)

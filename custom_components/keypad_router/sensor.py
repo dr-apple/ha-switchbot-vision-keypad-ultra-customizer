@@ -60,7 +60,7 @@ class LastAccessSensor(RestoreEntity, SensorEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        return keypad_device_info(self._entry, self.keypad_key)
+        return keypad_device_info(self.hass, self._entry, self.keypad_key)
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

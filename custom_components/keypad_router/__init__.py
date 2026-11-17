@@ -18,6 +18,7 @@ from datetime import timedelta
 from homeassistant.components.lock import LockEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
@@ -50,6 +51,7 @@ from .const import (
     DOOR_OPEN_VALUES,
     DOOR_SENSOR_DISABLED,
     DOOR_STABLE_SECONDS,
+    INTEGRATION_TITLE,
     KEYPAD_KEYS,
     LOCK_SLOT_KEYS,
     METHOD_LABELS,
@@ -69,6 +71,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # buttons / last-access sensors to it.
     router = KeypadRouter(hass, entry)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"router": router}
+
+    # Register the main (hub) device up front so per-keypad sub-devices can
+    # reference it by registry id (`via_device_id`) when their entities are added.
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=INTEGRATION_TITLE,
+        manufacturer="dr-apple",
+        model="keypad_router",
+    )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

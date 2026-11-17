@@ -98,7 +98,7 @@ class KeypadNameText(TextEntity, RestoreEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        return keypad_device_info(self._entry, self._keypad_key)
+        return keypad_device_info(self.hass, self._entry, self._keypad_key)
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -147,7 +147,7 @@ class KeypadSourceIdText(TextEntity, RestoreEntity):
 
     @property
     def device_info(self) -> DeviceInfo:
-        return keypad_device_info(self._entry, self._keypad_key)
+        return keypad_device_info(self.hass, self._entry, self._keypad_key)
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

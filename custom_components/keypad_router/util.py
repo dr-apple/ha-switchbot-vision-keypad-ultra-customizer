@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity import DeviceInfo
 
 from .const import (
@@ -43,10 +44,12 @@ def main_device_info(entry: ConfigEntry) -> DeviceInfo:
     return DeviceInfo(identifiers={(DOMAIN, entry.entry_id)}, name=INTEGRATION_TITLE)
 
 
-def keypad_device_info(entry: ConfigEntry, keypad_key: str) -> DeviceInfo:
+def keypad_device_info(
+    hass: HomeAssistant, entry: ConfigEntry, keypad_key: str
+) -> DeviceInfo:
     """A per-keypad sub-device, so each keypad's entities get their own
     device page instead of piling everything (persons x locks x 2 keypads)
-    onto one. Linked back to the main device via `via_device` -- shows up
+    onto one. Linked back to the main device via `via_device_id` -- shows up
     nested under it rather than as an unrelated device.
 
     The name includes the configured Quelle-ID (e.g. "tor"), once set, so
@@ -57,8 +60,15 @@ def keypad_device_info(entry: ConfigEntry, keypad_key: str) -> DeviceInfo:
         entry.options.get(CONF_KEYPADS, {}).get(keypad_key, {}).get(CONF_KEYPAD_SOURCE_ID)
     )
     name = f"Keypad {keypad_key}" + (f" ({source_id})" if source_id else "")
-    return DeviceInfo(
+    info = DeviceInfo(
         identifiers={(DOMAIN, f"{entry.entry_id}_keypad_{keypad_key}")},
         name=name,
-        via_device=(DOMAIN, entry.entry_id),
     )
+    # `via_device` (identifier tuple) is deprecated since it is ambiguous
+    # across config entries; link by the main device's registry id instead.
+    main = dr.async_get(hass).async_get_device(
+        identifiers={(DOMAIN, entry.entry_id)}
+    )
+    if main is not None:
+        info["via_device_id"] = main.id
+    return info

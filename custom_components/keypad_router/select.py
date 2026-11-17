@@ -174,7 +174,7 @@ class _BaseKeypadPersonSelect(_DomainOptionsRefreshMixin, SelectEntity, RestoreE
 
     @property
     def device_info(self) -> DeviceInfo:
-        return keypad_device_info(self._entry, self._keypad_key)
+        return keypad_device_info(self.hass, self._entry, self._keypad_key)
 
     def _keypad_person(self) -> dict:
         keypad = self._entry.options.get(CONF_KEYPADS, {}).get(self._keypad_key, {})

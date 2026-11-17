@@ -66,8 +66,8 @@ def keypad_device_info(
     )
     # `via_device` (identifier tuple) is deprecated since it is ambiguous
     # across config entries; link by the main device's registry id instead.
-    main = dr.async_get(hass).async_get_device(
-        identifiers={(DOMAIN, entry.entry_id)}
+    main = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, entry.entry_id), entry.entry_id
     )
     if main is not None:
         info["via_device_id"] = main.id
